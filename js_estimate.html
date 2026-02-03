@@ -1306,12 +1306,10 @@ function saveEstimate() {
 }
 
 // =========================
-// ✅ PDF로 내보내기 (이미지 양식 기반)
+// ✅ PDF로 내보내기 (체크된 품목만, 공정별 대제목 + 품목 하위)
 // =========================
 function exportEstimatePDF() {
   const totals = calculateTotals();
-  
-  // 공정별로 그룹화 (이미지 양식에 맞게)
   const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
   const byCategory = {};
   estimateItems.forEach(function(item) {
@@ -1319,33 +1317,30 @@ function exportEstimatePDF() {
     byCategory[item.category].push(item);
   });
   
-  // 공정별 합계 계산
-  const categoryTotals = {};
-  categoryOrder.forEach(function(cat) {
-    const items = byCategory[cat];
-    if (items && items.length > 0) {
-      categoryTotals[cat] = items.reduce((sum, item) => sum + (Number(item.totalAmount) || 0), 0);
-    }
-  });
-  
-  // 품목 행 생성 (공정별로 그룹화)
-  let rows = '';
   let no = 0;
+  let rows = '';
   categoryOrder.forEach(function(cat) {
     const items = byCategory[cat];
     if (!items || items.length === 0) return;
-    
-    // 공정별 합계를 하나의 행으로 표시
-    const catTotal = categoryTotals[cat];
-    no++;
-    rows += '<tr>' +
-      '<td class="text-center">' + no + '</td>' +
-      '<td>' + escapeHtml(cat) + '</td>' +
-      '<td class="text-center">식</td>' +
-      '<td class="text-center">1</td>' +
-      '<td class="text-end">' + catTotal.toLocaleString() + '</td>' +
-      '<td></td>' +
-      '</tr>';
+    rows += '<tr class="section-header"><td colspan="10"><strong>■ ' + escapeHtml(cat) + '</strong></td></tr>';
+    let catSum = 0;
+    items.forEach(function(item) {
+      no++;
+      catSum += Number(item.totalAmount) || 0;
+      rows += '<tr>' +
+        '<td>' + no + '</td>' +
+        '<td>' + escapeHtml(item.item) + '</td>' +
+        '<td>' + escapeHtml(item.spec || '-') + '</td>' +
+        '<td>' + item.unit + '</td>' +
+        '<td class="text-end">' + Number(item.qty) + '</td>' +
+        '<td class="text-end">' + Number(item.materialPrice).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.materialAmount).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.laborPrice).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.laborAmount).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.totalAmount).toLocaleString() + '</td>' +
+        '</tr>';
+    });
+    rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
   });
   
   // 작성일 포맷
@@ -1420,20 +1415,18 @@ function exportEstimatePDF() {
     .amount-number { font-size: 1.1em; margin-bottom: 5px; }
     .amount-vat { font-size: 0.9em; color: #d00; display: inline-block; margin-left: 10px; }
     .date-section { text-align: right; margin-bottom: 20px; font-size: 1em; }
-    .estimate-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 10pt; }
-    .estimate-table th, .estimate-table td { border: 1px solid #333; padding: 8px 6px; text-align: center; }
-    .estimate-table th { background: #f0f0f0; font-weight: bold; }
-    .estimate-table td.text-left { text-align: left; }
-    .estimate-table td.text-right { text-align: right; }
-    .subtotal-row { background: #f9f9f9; font-weight: bold; }
-    .overhead-row td, .profit-row td { text-align: right; padding-right: 10px; }
-    .adjusted-row { font-weight: bold; }
-    .vat-row { background: #e6f3ff; font-weight: bold; }
-    .notes-section { margin-top: 30px; padding: 15px; background: #fff9e6; border: 1px solid #ddd; }
-    .notes-title { font-weight: bold; margin-bottom: 10px; }
-    .notes-content { line-height: 1.8; font-size: 0.95em; }
-    .notes-content div { margin: 5px 0; }
     .page-watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 8em; color: rgba(0,0,0,0.05); font-weight: bold; pointer-events: none; z-index: -1; }
+    h1 { font-size: 1.4em; margin: 0 0 6px 0; }
+    .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; font-size: 10pt; }
+    th, td { border: 1px solid #333; padding: 4px 6px; text-align: left; overflow: hidden; }
+    th { background: #eee; font-weight: bold; }
+    .text-end { text-align: right; }
+    tr.section-header td { background: #e0e0e0; font-size: 1em; font-weight: bold; padding: 5px 6px; }
+    tr.category-subtotal td { background: #f5f5f5; font-weight: bold; }
+    .summary { margin-top: 8px; }
+    .summary td { border: none; padding: 2px 6px; }
+    .total-row { font-weight: bold; font-size: 1.05em; }
     .preview-actions { margin-top: 20px; padding: 12px; border-top: 1px solid #ccc; display: flex; gap: 12px; }
     .btn-print, .btn-close { padding: 10px 20px; font-size: 14px; cursor: pointer; border-radius: 6px; border: 1px solid #333; }
     .btn-print { background: #0d6efd; color: #fff; border-color: #0d6efd; }
@@ -1445,12 +1438,13 @@ function exportEstimatePDF() {
       body { width: 100%; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .sheet { width: 273mm; min-height: auto; padding: 0; margin: 0; }
       .preview-actions, .print-hint { display: none !important; }
-      .page-watermark { display: block; }
+      .cover-page { page-break-after: always; }
     }
   </style>
 </head>
 <body>
-<div class="sheet">
+<!-- 표지 (갑지) - 이미지 양식 -->
+<div class="sheet" style="page-break-after: always;">
   <div class="attachment-label">별첨1</div>
   <div class="page-watermark">1 페이지</div>
   
@@ -1474,58 +1468,33 @@ function exportEstimatePDF() {
       <div>TEL : 010.7434.1322</div>
     </div>
   </div>
-  
-  <table class="estimate-table">
+</div>
+
+<!-- 세부 내역 -->
+<div class="sheet">
+  <h1>견적서 상세 내역</h1>
+  <div class="info">
+    <strong>현장명:</strong> ${escapeHtml(estimateSettings.siteName || '-')} &nbsp;|&nbsp;
+    <strong>평수:</strong> ${estimateSettings.area || '-'}평 &nbsp;|&nbsp;
+    <strong>천장고:</strong> ${currentDrawing ? (currentDrawing.height || 2300) : 2300}mm
+  </div>
+  <table>
     <thead>
       <tr>
-        <th style="width: 8%;">순번</th>
-        <th style="width: 25%;">품목</th>
-        <th style="width: 10%;">단위</th>
-        <th style="width: 10%;">수량</th>
-        <th style="width: 20%;">금액</th>
-        <th style="width: 27%;">비고</th>
+        <th>No</th><th>품목</th><th>규격</th><th>단위</th><th>수량</th>
+        <th class="text-end">재료비단가</th><th class="text-end">재료비금액</th>
+        <th class="text-end">노무비단가</th><th class="text-end">노무비금액</th><th class="text-end">금액</th>
       </tr>
     </thead>
-    <tbody>
-      ${rows}
-      <tr class="subtotal-row">
-        <td colspan="4" class="text-right" style="text-align: right; padding-right: 10px;">소계</td>
-        <td class="text-right">${totals.subtotal.toLocaleString()}</td>
-        <td></td>
-      </tr>
-      <tr class="overhead-row">
-        <td colspan="4" class="text-right" style="text-align: right; padding-right: 10px;">공과잡비</td>
-        <td class="text-right">% 5</td>
-        <td class="text-right">${totals.overhead.toLocaleString()}</td>
-      </tr>
-      <tr class="profit-row">
-        <td colspan="4" class="text-right" style="text-align: right; padding-right: 10px;">이윤</td>
-        <td class="text-right">% 10</td>
-        <td class="text-right">${totals.profit.toLocaleString()}</td>
-      </tr>
-      <tr class="adjusted-row">
-        <td colspan="4" class="text-left">공사금액 조정계</td>
-        <td class="text-right">${adjustedAmount.toLocaleString()}</td>
-        <td style="font-size: 0.9em; color: #666;">(십만단위절삭)</td>
-      </tr>
-      <tr class="vat-row">
-        <td colspan="4" class="text-left">VAT 포함금액</td>
-        <td class="text-right">${vatIncludedAmount.toLocaleString()}</td>
-        <td style="font-size: 0.9em; color: #666;">(단위절삭)</td>
-      </tr>
-    </tbody>
+    <tbody>${rows}</tbody>
   </table>
-  
-  <div class="notes-section">
-    <div class="notes-title">*특이사항</div>
-    <div class="notes-content">
-      <div>○ 디자인 전 견적은 디자인이후 견적과 상의할수 있습니다.</div>
-      <div>○ 2층 문 별도</div>
-      <div>○ 코르크 바닥, 한지마루 별도</div>
-      <div>○ 견적변동 될 수 있습니다.</div>
-    </div>
-  </div>
-  
+  <table class="summary">
+    <tr><td colspan="9" class="text-end">소계</td><td class="text-end">${totals.subtotal.toLocaleString()}원</td></tr>
+    <tr><td colspan="9" class="text-end">공과잡비(5%)</td><td class="text-end">${totals.overhead.toLocaleString()}원</td></tr>
+    <tr><td colspan="9" class="text-end">이윤(10%)</td><td class="text-end">${totals.profit.toLocaleString()}원</td></tr>
+    <tr><td colspan="9" class="text-end">조정액</td><td class="text-end">${totals.adjusted.toLocaleString()}원</td></tr>
+    <tr class="total-row"><td colspan="9" class="text-end">총액 (VAT 별도)</td><td class="text-end">${totals.total.toLocaleString()}원</td></tr>
+  </table>
   <p class="print-hint" style="margin-top:16px;padding:10px;background:#fff3cd;border-radius:6px;font-size:14px;">
     <strong>가로 인쇄:</strong> 아래 버튼 클릭 후 인쇄 창에서 <strong>방향 → 가로</strong>를 선택한 뒤 PDF로 저장하세요.
   </p>
