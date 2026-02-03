@@ -416,12 +416,40 @@
     }
     
     #estimate-container .table th {
-      padding: 8px 6px;
+      padding: 8px 4px;
       font-size: 10px;
       white-space: nowrap;
       position: sticky;
       background: #6c757d;
       z-index: 10;
+    }
+    
+    /* 컬럼 너비 조정 */
+    #estimate-container .table th:nth-child(2) {
+      width: 100px !important;
+      min-width: 100px;
+    }
+    
+    #estimate-container .table th:nth-child(3) {
+      width: 100px !important;
+      min-width: 100px;
+    }
+    
+    #estimate-container .table th:nth-child(4) {
+      width: 50px !important;
+      min-width: 50px;
+    }
+    
+    #estimate-container .table th:nth-child(5) {
+      width: 70px !important;
+      min-width: 70px;
+    }
+    
+    #estimate-container .table th:nth-child(6),
+    #estimate-container .table th:nth-child(7),
+    #estimate-container .table th:nth-child(8) {
+      width: 80px !important;
+      min-width: 80px;
     }
     
     #estimate-container .table th:first-child {
@@ -430,7 +458,7 @@
     }
     
     #estimate-container .table td {
-      padding: 8px 6px;
+      padding: 8px 4px;
       white-space: nowrap;
     }
     
@@ -438,17 +466,23 @@
     #estimate-container .table td:nth-child(2) {
       white-space: normal;
       word-break: break-word;
-      max-width: 150px;
-      min-width: 120px;
+      max-width: 100px;
+      min-width: 100px;
       line-height: 1.3;
+    }
+    
+    /* 규격 컬럼 너비 조정 */
+    #estimate-container .table td:nth-child(3) {
+      max-width: 100px;
+      min-width: 100px;
     }
     
     #estimate-container .table input {
       font-size: 13px !important;
-      padding: 5px 4px !important;
+      padding: 5px 3px !important;
       min-height: 34px;
       width: 100%;
-      min-width: 80px;
+      min-width: 60px;
     }
     
     /* 체크박스는 고정 */
@@ -535,12 +569,44 @@
     }
     
     #settings-container .table th {
-      padding: 8px 6px;
+      padding: 8px 4px;
       font-size: 11px;
       white-space: nowrap;
       position: sticky;
       background: #6c757d;
       z-index: 10;
+    }
+    
+    /* 컬럼 너비 조정 */
+    #settings-container .table th:nth-child(1) {
+      width: 35px !important;
+      min-width: 35px;
+    }
+    
+    #settings-container .table th:nth-child(2) {
+      width: 90px !important;
+      min-width: 90px;
+    }
+    
+    #settings-container .table th:nth-child(3) {
+      width: 90px !important;
+      min-width: 90px;
+    }
+    
+    #settings-container .table th:nth-child(4) {
+      width: 50px !important;
+      min-width: 50px;
+    }
+    
+    #settings-container .table th:nth-child(5),
+    #settings-container .table th:nth-child(6) {
+      width: 80px !important;
+      min-width: 80px;
+    }
+    
+    #settings-container .table th:nth-child(7) {
+      width: 60px !important;
+      min-width: 60px;
     }
     
     #settings-container .table th:first-child {
@@ -550,7 +616,7 @@
     }
     
     #settings-container .table td {
-      padding: 8px 6px;
+      padding: 8px 4px;
       white-space: nowrap;
     }
     
@@ -560,31 +626,33 @@
       left: 0;
       background: #212529;
       z-index: 5;
-      padding: 8px 4px;
+      padding: 8px 2px;
       text-align: center;
+      width: 35px;
     }
     
     /* 품목명은 두 줄로 표시 */
     #settings-container .table td:nth-child(2) {
       white-space: normal;
       word-break: break-word;
-      max-width: 120px;
-      min-width: 100px;
+      max-width: 90px;
+      min-width: 90px;
       line-height: 1.3;
     }
     
     /* 규격 컬럼은 가로 스와이프로 볼 수 있도록 */
     #settings-container .table td:nth-child(3) {
-      min-width: 120px;
+      min-width: 90px;
+      max-width: 90px;
       white-space: normal;
       word-break: break-word;
     }
     
     #settings-container .table input {
-      font-size: 13px !important;
-      padding: 5px 4px !important;
+      font-size: 12px !important;
+      padding: 4px 3px !important;
       width: 100%;
-      min-width: 80px;
+      min-width: 60px;
     }
     
     #settings-container .btn-sm {
