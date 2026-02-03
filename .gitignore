@@ -1,1 +1,26 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Apps Script
+.clasp.json
+*.gs.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
