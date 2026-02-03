@@ -281,9 +281,14 @@ function renderItemsManagement() {
         <h5 class="mb-0 text-white">
           <i class="bi bi-list-ul"></i> ${currentCategory} 품목 관리
         </h5>
-        <button class="btn btn-success btn-sm" onclick="showAddItemModal()">
-          <i class="bi bi-plus-circle"></i> 품목 추가
-        </button>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="saveItemsToServer()">
+            <i class="bi bi-save"></i> 변경사항 저장
+          </button>
+          <button class="btn btn-success btn-sm" onclick="showAddItemModal()">
+            <i class="bi bi-plus-circle"></i> 품목 추가
+          </button>
+        </div>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -315,15 +320,43 @@ function renderItemsManagement() {
       html += `
         <tr>
           <td>${idx + 1}</td>
-          <td>${escapeHtml(item.item)}</td>
-          <td class="text-muted small">${escapeHtml(item.spec || '-')}</td>
-          <td class="text-center">${item.unit}</td>
-          <td class="text-end">${item.materialPrice.toLocaleString()}</td>
-          <td class="text-end">${item.laborPrice.toLocaleString()}</td>
+          <td>
+            <input type="text"
+                   class="form-control form-control-sm bg-dark text-white border-secondary"
+                   value="${escapeHtml(item.item)}"
+                   onchange="updateItemField(${idx}, 'item', this.value)">
+          </td>
+          <td>
+            <input type="text"
+                   class="form-control form-control-sm bg-dark text-white border-secondary"
+                   value="${escapeHtml(item.spec || '')}"
+                   placeholder="-"
+                   onchange="updateItemField(${idx}, 'spec', this.value)">
+          </td>
+          <td>
+            <input type="text"
+                   class="form-control form-control-sm bg-dark text-white border-secondary text-center"
+                   style="max-width: 80px;"
+                   value="${item.unit}"
+                   onchange="updateItemField(${idx}, 'unit', this.value)">
+          </td>
+          <td>
+            <input type="number"
+                   class="form-control form-control-sm bg-dark text-white border-secondary text-end"
+                   style="max-width: 120px;"
+                   value="${item.materialPrice}"
+                   min="0"
+                   onchange="updateItemField(${idx}, 'materialPrice', this.value)">
+          </td>
+          <td>
+            <input type="number"
+                   class="form-control form-control-sm bg-dark text-white border-secondary text-end"
+                   style="max-width: 120px;"
+                   value="${item.laborPrice}"
+                   min="0"
+                   onchange="updateItemField(${idx}, 'laborPrice', this.value)">
+          </td>
           <td class="text-center">
-            <button class="btn btn-sm btn-outline-warning me-1" onclick="editItem(${idx})" title="수정">
-              <i class="bi bi-pencil"></i>
-            </button>
             <button class="btn btn-sm btn-outline-danger" onclick="deleteItem(${idx})" title="삭제">
               <i class="bi bi-trash"></i>
             </button>
@@ -346,6 +379,23 @@ function renderItemsManagement() {
   // 모달 생성
   if (!document.getElementById('itemModal')) {
     createItemModal();
+  }
+}
+
+// =========================
+// ✅ 인라인 수정 값 반영
+// =========================
+function updateItemField(index, field, value) {
+  if (!settingsPriceTables[currentCategory] ||
+      !settingsPriceTables[currentCategory][index]) {
+    return;
+  }
+  const item = settingsPriceTables[currentCategory][index];
+  
+  if (field === 'materialPrice' || field === 'laborPrice') {
+    item[field] = Number(value) || 0;
+  } else {
+    item[field] = String(value || '').trim();
   }
 }
 
