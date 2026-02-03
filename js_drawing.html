@@ -157,15 +157,13 @@ let state = {
 window.applyPanMode = function(on){
   state.panMode = !!on;
 
-  // 켜는 순간: 그리기 중인 선이 있으면 안전하게 취소
-  points = [];
-  snapTarget = null;
-  mouse.snapped = false;
-  mouse.snapLine = null;
-
+  // ✅ 화면이동 모드로 전환할 때 points를 초기화하지 않음 (벽체 그리는 중에도 화면 이동 가능)
+  // points는 그대로 유지하여 벽체 그리기를 계속할 수 있도록 함
+  
   // 끄는 순간: 드래그 상태 정리
   if(!state.panMode){
     state.draggingCanvas = false;
+    // 화면이동 모드 해제 시에도 points는 유지 (벽체 그리기 계속 가능)
   }
 
   draw();
