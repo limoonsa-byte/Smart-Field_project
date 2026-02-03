@@ -1343,6 +1343,13 @@ function exportEstimatePDF() {
     rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
   });
   
+  // 작성일 포맷
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const writeDate = `${year}년 ${month}월 ${day}일`;
+  
   const html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -1351,6 +1358,12 @@ function exportEstimatePDF() {
   <style>
     body { font-family: Malgun Gothic, sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
     .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; }
+    .cover-page { page-break-after: always; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 186mm; text-align: center; }
+    .cover-title { font-size: 3em; font-weight: bold; margin-bottom: 40px; color: #1a1a1a; }
+    .cover-info { font-size: 1.3em; line-height: 2; margin-bottom: 60px; }
+    .cover-info-item { margin: 15px 0; }
+    .cover-info-label { font-weight: bold; color: #555; }
+    .cover-date { font-size: 1.1em; color: #666; margin-top: 80px; }
     h1 { font-size: 1.4em; margin: 0 0 6px 0; }
     .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; font-size: 10pt; }
@@ -1373,12 +1386,29 @@ function exportEstimatePDF() {
       body { width: 100%; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .sheet { width: 273mm; min-height: auto; padding: 0; margin: 0; }
       .preview-actions, .print-hint { display: none !important; }
+      .cover-page { page-break-after: always; }
     }
   </style>
 </head>
 <body>
+<!-- 갑지 (표지) -->
+<div class="sheet cover-page">
+  <div class="cover-title">견적서</div>
+  <div class="cover-info">
+    <div class="cover-info-item">
+      <span class="cover-info-label">현장명:</span> ${escapeHtml(estimateSettings.siteName || '-')}
+    </div>
+    <div class="cover-info-item">
+      <span class="cover-info-label">평수:</span> ${estimateSettings.area || '-'}평
+    </div>
+    ${currentDrawing ? `<div class="cover-info-item"><span class="cover-info-label">천장고:</span> ${currentDrawing.height || 2300}mm</div>` : ''}
+  </div>
+  <div class="cover-date">${writeDate}</div>
+</div>
+
+<!-- 세부 내역 -->
 <div class="sheet">
-  <h1>견적서 <span style="font-size:0.6em;color:#666;">(미리보기)</span></h1>
+  <h1>견적서 상세 내역</h1>
   <div class="info">
     <strong>현장명:</strong> ${escapeHtml(estimateSettings.siteName || '-')} &nbsp;|&nbsp;
     <strong>평수:</strong> ${estimateSettings.area || '-'}평 &nbsp;|&nbsp;
