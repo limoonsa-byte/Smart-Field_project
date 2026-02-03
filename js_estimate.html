@@ -1344,7 +1344,7 @@ function exportEstimatePDF() {
     rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
   });
   
-  // 표지용 간단한 공정별 목록
+  // 표지용 공정별 합계만 (세부 품목 제외)
   let coverNo = 0;
   let coverRows = '';
   categoryOrder.forEach(function(cat) {
@@ -1352,18 +1352,17 @@ function exportEstimatePDF() {
     if (!items || items.length === 0) return;
     let catSum = 0;
     items.forEach(function(item) {
-      coverNo++;
       catSum += Number(item.totalAmount) || 0;
-      coverRows += '<tr>' +
-        '<td class="text-center">' + coverNo + '</td>' +
-        '<td>' + escapeHtml(item.item) + '</td>' +
-        '<td class="text-center">' + item.unit + '</td>' +
-        '<td class="text-end">' + Number(item.qty) + '</td>' +
-        '<td class="text-end">' + Number(item.totalAmount).toLocaleString() + '</td>' +
-        '<td></td>' +
-        '</tr>';
     });
-    coverRows += '<tr class="cover-category-subtotal"><td colspan="4" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '</strong></td><td></td></tr>';
+    coverNo++;
+    coverRows += '<tr>' +
+      '<td class="text-center">' + coverNo + '</td>' +
+      '<td>' + escapeHtml(cat) + '</td>' +
+      '<td class="text-center">-</td>' +
+      '<td class="text-end">-</td>' +
+      '<td class="text-end">' + catSum.toLocaleString() + '</td>' +
+      '<td></td>' +
+      '</tr>';
   });
   
   // 작성일 포맷
@@ -1484,8 +1483,8 @@ function exportEstimatePDF() {
     <tbody>
       ${coverRows}
       <tr class="cover-total-row">
-        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">총액 (VAT 별도)</td>
-        <td class="text-end">${totals.total.toLocaleString()}</td>
+        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;"><strong>총액 (VAT 별도)</strong></td>
+        <td class="text-end"><strong>${totals.total.toLocaleString()}</strong></td>
         <td></td>
       </tr>
     </tbody>
