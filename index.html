@@ -11,6 +11,42 @@
   <?!= include('css'); ?>
 
   <script>
+    // ✅ Google Apps Script 배너 제거
+    document.addEventListener('DOMContentLoaded', function() {
+      // 배너 요소 찾아서 제거
+      const banners = document.querySelectorAll('[class*="banner"], [id*="banner"], [style*="e8f0fe"], [style*="rgb(232, 240, 254)"]');
+      banners.forEach(banner => {
+        if (banner.textContent && banner.textContent.includes('Google Apps Script')) {
+          banner.remove();
+        }
+      });
+      
+      // 동적으로 추가되는 배너도 제거
+      const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          mutation.addedNodes.forEach(function(node) {
+            if (node.nodeType === 1) { // Element node
+              if (node.textContent && node.textContent.includes('Google Apps Script')) {
+                node.remove();
+              }
+              // 자식 요소도 확인
+              const childBanners = node.querySelectorAll('[class*="banner"], [id*="banner"]');
+              childBanners.forEach(banner => {
+                if (banner.textContent && banner.textContent.includes('Google Apps Script')) {
+                  banner.remove();
+                }
+              });
+            }
+          });
+        });
+      });
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    });
+    
     // ✅ 화면에서 바로 에러 확인 (모바일에서도 원인 잡기 쉬움)
     window.addEventListener('error', (e) => {
       alert('JS 오류: ' + (e.message || e.error) + '\n(' + (e.filename || '') + ':' + (e.lineno || '') + ')');

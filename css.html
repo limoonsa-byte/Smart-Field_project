@@ -1,4 +1,16 @@
 <style>
+  /* ✅ Google Apps Script 배너 숨기기 */
+  .goog-banner,
+  [class*="banner"],
+  [id*="banner"],
+  div[style*="background-color: rgb(232, 240, 254)"],
+  div[style*="background-color:#e8f0fe"] {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+  
   body, html { 
     width: 100%; 
     height: 100%; 
