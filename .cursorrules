@@ -1,0 +1,45 @@
+# Smart Field Project - Cursor AI 규칙
+
+## 프로젝트 개요
+이 프로젝트는 Google Apps Script 기반의 현장 관리 시스템입니다.
+로컬 코드 → Apps Script → GitHub 세 곳의 동기화가 중요합니다.
+
+## 작업 종료 시 "채팅종료" 규칙
+
+사용자가 "채팅종료" 또는 "채팅 종료"라고 입력하면, 다음을 자동으로 실행해야 합니다:
+
+1. **Apps Script에 코드 업로드**
+   ```bash
+   clasp push
+   ```
+
+2. **GitHub에 커밋 및 푸시**
+   ```bash
+   git add .
+   git commit -m "작업 완료: [간단한 작업 내용 요약]"
+   git push origin main
+   ```
+
+3. **완료 메시지 표시**
+   - "✅ 작업이 완료되었습니다. Apps Script와 GitHub에 모두 반영되었습니다."
+
+## 중요 규칙
+
+- 모든 코드 수정은 로컬 파일에서만 수행
+- 작업 종료 시 반드시 "채팅종료" 입력하여 동기화
+- 커밋 메시지는 작업 내용을 간단히 요약
+- `.clasp.json` 파일은 절대 커밋하지 않음 (이미 .gitignore에 포함됨)
+
+## 파일 구조
+
+- `code.js` - Apps Script 메인 코드
+- `index.html` - 메인 HTML 파일
+- `js_*.html` - 각 기능별 JavaScript 파일
+- `css.html` - CSS 스타일
+- `.clasp.json` - Apps Script 연동 설정 (로컬 전용, 커밋 안 함)
+
+## 작업 흐름
+
+1. 작업 시작: `git pull` (필요시 `clasp pull`)
+2. 코드 수정: 로컬 파일 편집
+3. 작업 종료: "채팅종료" 입력 → 자동 동기화
