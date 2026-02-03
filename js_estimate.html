@@ -1348,7 +1348,47 @@ function exportEstimatePDF() {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
-  const writeDate = `${year}년 ${month}월 ${day}일`;
+  const writeDate = `${year}-${month}-${day}`;
+  
+  // 금액을 한글로 변환하는 함수
+  function numberToKorean(num) {
+    const units = ['', '만', '억', '조'];
+    const digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+    const tens = ['', '십', '이십', '삼십', '사십', '오십', '육십', '칠십', '팔십', '구십'];
+    const hundreds = ['', '일백', '이백', '삼백', '사백', '오백', '육백', '칠백', '팔백', '구백'];
+    const thousands = ['', '일천', '이천', '삼천', '사천', '오천', '육천', '칠천', '팔천', '구천'];
+    
+    if (num === 0) return '영';
+    
+    let result = '';
+    let unitIndex = 0;
+    let temp = num;
+    
+    while (temp > 0) {
+      const remainder = temp % 10000;
+      if (remainder > 0) {
+        let part = '';
+        const 천 = Math.floor(remainder / 1000);
+        const 백 = Math.floor((remainder % 1000) / 100);
+        const 십 = Math.floor((remainder % 100) / 10);
+        const 일 = remainder % 10;
+        
+        if (천 > 0) part += thousands[천];
+        if (백 > 0) part += hundreds[백];
+        if (십 > 0) part += tens[십];
+        if (일 > 0) part += digits[일];
+        
+        if (unitIndex > 0) part += units[unitIndex];
+        result = part + result;
+      }
+      temp = Math.floor(temp / 10000);
+      unitIndex++;
+    }
+    
+    return result + '원정';
+  }
+  
+  const totalKorean = numberToKorean(totals.total);
   
   const html = `<!DOCTYPE html>
 <html lang="ko">
@@ -1358,12 +1398,20 @@ function exportEstimatePDF() {
   <style>
     body { font-family: Malgun Gothic, sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
     .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; }
-    .cover-page { page-break-after: always; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 186mm; text-align: center; }
-    .cover-title { font-size: 3em; font-weight: bold; margin-bottom: 40px; color: #1a1a1a; }
-    .cover-info { font-size: 1.3em; line-height: 2; margin-bottom: 60px; }
-    .cover-info-item { margin: 15px 0; }
-    .cover-info-label { font-weight: bold; color: #555; }
-    .cover-date { font-size: 1.1em; color: #666; margin-top: 80px; }
+    .cover-page { page-break-after: always; padding: 20mm; }
+    .cover-title { font-size: 2.5em; font-weight: bold; text-align: center; margin-bottom: 50px; padding-bottom: 20px; border-bottom: 2px solid #000; }
+    .cover-section { margin-bottom: 30px; }
+    .cover-label { font-size: 1.1em; font-weight: bold; margin-bottom: 8px; }
+    .cover-value { font-size: 1.2em; margin-left: 10px; }
+    .cover-amount { font-size: 1.5em; font-weight: bold; text-align: center; margin: 30px 0; padding: 15px; background-color: #f5f5f5; border: 2px solid #333; }
+    .cover-amount-korean { font-size: 1.3em; margin-bottom: 10px; }
+    .cover-amount-number { font-size: 1.1em; color: #333; }
+    .cover-vat { font-size: 0.9em; color: #666; margin-top: 5px; }
+    .cover-date-section { text-align: right; margin-top: 40px; }
+    .cover-contact { margin-top: 30px; font-size: 0.95em; line-height: 1.8; }
+    .cover-notes { margin-top: 40px; padding: 15px; background-color: #fff9e6; border: 1px solid #ddd; }
+    .cover-notes-title { font-weight: bold; margin-bottom: 10px; }
+    .cover-notes-content { line-height: 1.8; font-size: 0.95em; }
     h1 { font-size: 1.4em; margin: 0 0 6px 0; }
     .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; font-size: 10pt; }
@@ -1394,16 +1442,35 @@ function exportEstimatePDF() {
 <!-- 갑지 (표지) -->
 <div class="sheet cover-page">
   <div class="cover-title">견적서</div>
-  <div class="cover-info">
-    <div class="cover-info-item">
-      <span class="cover-info-label">현장명:</span> ${escapeHtml(estimateSettings.siteName || '-')}
-    </div>
-    <div class="cover-info-item">
-      <span class="cover-info-label">평수:</span> ${estimateSettings.area || '-'}평
-    </div>
-    ${currentDrawing ? `<div class="cover-info-item"><span class="cover-info-label">천장고:</span> ${currentDrawing.height || 2300}mm</div>` : ''}
+  
+  <div class="cover-section">
+    <div class="cover-label">공사명:</div>
+    <div class="cover-value" style="font-size: 1.3em; margin-left: 0; margin-top: 5px;">${escapeHtml(estimateSettings.siteName || '-')}</div>
   </div>
-  <div class="cover-date">${writeDate}</div>
+  
+  <div class="cover-amount">
+    <div class="cover-amount-korean">공사금액: ${totalKorean}</div>
+    <div class="cover-amount-number">₩${totals.total.toLocaleString()}</div>
+    <div class="cover-vat">(VAT 포함)</div>
+  </div>
+  
+  <div class="cover-date-section">
+    <div class="cover-label" style="display: inline-block; margin-right: 10px;">견적일시:</div>
+    <div class="cover-value" style="display: inline-block;">${writeDate}</div>
+  </div>
+  
+  <div class="cover-contact">
+    <div style="margin-bottom: 8px;"><strong>주소:</strong> (주소 입력 필요)</div>
+    <div><strong>TEL:</strong> (전화번호 입력 필요)</div>
+  </div>
+  
+  <div class="cover-notes">
+    <div class="cover-notes-title">특이사항:</div>
+    <div class="cover-notes-content">
+      • 디자인 전 견적은 디자인이후 견적과 상의할 수 있습니다.<br>
+      • 견적변동 될 수 있습니다.
+    </div>
+  </div>
 </div>
 
 <!-- 세부 내역 -->
