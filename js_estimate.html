@@ -839,9 +839,9 @@ function renderEstimateUI() {
                 <thead class="table-secondary">
                   <tr>
                     <th style="width: 50px;" class="text-center">✓</th>
-                    <th style="width: 200px;">품목</th>
-                    <th style="width: 150px;">규격</th>
-                    <th style="width: 60px;" class="text-center">단위</th>
+                    <th style="width: 180px;">품목</th>
+                    <th style="width: 180px; min-width: 150px;">규격</th>
+                    <th style="width: 70px;" class="text-center">단위</th>
                     <th style="width: 100px;">수량</th>
                     <th style="width: 100px;" class="text-end">재료비</th>
                     <th style="width: 100px;" class="text-end">노무비</th>
@@ -883,9 +883,9 @@ function renderEstimateUI() {
             <input type="checkbox" class="form-check-input" ${isChecked ? 'checked' : ''}
                    onchange="toggleEstimateItem('${category}', ${itemIdx}, this.checked)">
           </td>
-          <td>${priceItem.item}</td>
-          <td class="small text-muted">${priceItem.spec || '-'}</td>
-          <td class="text-center">${priceItem.unit}</td>
+          <td>${escapeHtml(priceItem.item)}</td>
+          <td style="color: #adb5bd; font-size: 0.9em; white-space: normal; word-break: break-word;">${escapeHtml(priceItem.spec || '-')}</td>
+          <td class="text-center">${escapeHtml(priceItem.unit)}</td>
           <td>
             <input type="number" class="form-control text-end" 
                    style="min-height: 38px; font-size: 16px;"
