@@ -240,6 +240,276 @@
     border-radius: 10px;
   }
 
+  /* ✅ 스마트폰 최적화 (태블릿/PC는 그대로) */
+  @media (max-width: 767px) {
+    /* 도면 그리기 화면 */
+    #top-bar {
+      height: 48px;
+      padding: 0 8px;
+      font-size: 14px;
+    }
+    #top-bar input {
+      font-size: 14px !important;
+      padding: 6px 8px !important;
+    }
+    #top-bar .input-group-sm {
+      width: 120px !important;
+    }
+    
+    #right-controls {
+      width: 120px;
+      top: 58px;
+      right: 6px;
+      gap: 5px;
+      padding-top: 4px;
+      padding-bottom: 12px;
+    }
+    
+    .tool-btn {
+      min-height: 42px;
+      padding: 5px 3px;
+      border-radius: 8px;
+    }
+    
+    .tool-btn i {
+      font-size: 16px;
+    }
+    
+    .tool-btn span {
+      font-size: 9px;
+    }
+    
+    #btn-pan {
+      padding: 8px 10px;
+      min-height: 42px;
+    }
+    
+    #btn-pan span {
+      font-size: 11px;
+    }
+    
+    #btn-pan i {
+      font-size: 16px;
+    }
+    
+    #bottom-controls {
+      bottom: 12px;
+      gap: 6px;
+      width: 98%;
+    }
+    
+    #bottom-controls button {
+      padding: 12px 6px;
+      font-size: 14px;
+      min-height: 48px;
+      border-radius: 10px;
+    }
+    
+    #nav-controls {
+      left: 8px;
+      bottom: 75px;
+      gap: 6px;
+      padding: 8px;
+    }
+    
+    #nav-controls .nav-btn {
+      width: 40px;
+      height: 40px;
+    }
+    
+    #toolbar-toggle {
+      top: 60px;
+      right: 8px;
+      width: 40px;
+      height: 40px;
+    }
+    
+    #info-overlay {
+      top: 58px;
+      left: 8px;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    
+    /* 치수 입력 모달 */
+    .center-modal {
+      width: 95%;
+      max-width: 320px;
+      padding: 20px;
+    }
+    
+    .center-modal h5 {
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    
+    .center-modal input {
+      font-size: 28px !important;
+      padding: 14px !important;
+    }
+    
+    .center-modal button {
+      min-height: 48px;
+      font-size: 15px;
+    }
+    
+    /* 메인 화면 버튼 */
+    #screen-main .btn-lg {
+      padding: 14px 12px !important;
+      font-size: 16px !important;
+    }
+    
+    /* 견적내기 화면 */
+    #estimate-container h3 {
+      font-size: 1.25rem;
+    }
+    
+    #estimate-container .card-header h5 {
+      font-size: 0.95rem;
+    }
+    
+    #estimate-container .d-flex.justify-content-between {
+      flex-wrap: wrap;
+    }
+    
+    #estimate-container .d-flex.gap-2 {
+      flex-wrap: wrap;
+      gap: 4px !important;
+      margin-top: 8px;
+    }
+    
+    #estimate-container .btn-sm {
+      padding: 6px 8px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    
+    #estimate-container .btn-sm i {
+      font-size: 13px;
+      margin-right: 3px;
+    }
+    
+    #estimate-container .accordion-button {
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    
+    #estimate-container .accordion-button .badge {
+      font-size: 11px;
+      padding: 4px 6px;
+    }
+    
+    #estimate-container .table {
+      font-size: 11px;
+    }
+    
+    #estimate-container .table th {
+      padding: 6px 2px;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    
+    #estimate-container .table td {
+      padding: 6px 2px;
+    }
+    
+    #estimate-container .table input {
+      font-size: 13px !important;
+      padding: 5px 3px !important;
+      min-height: 34px;
+    }
+    
+    #estimate-container .table-responsive {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* 견적 요약 카드 */
+    #estimate-container .card-body .table td {
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+    
+    /* 현장 정보 카드 */
+    #estimate-container .card-body .row {
+      font-size: 13px;
+    }
+    
+    #estimate-container .badge {
+      font-size: 11px;
+      padding: 4px 6px;
+    }
+    
+    /* 보관함 화면 */
+    #list-container .col-6 {
+      padding: 0 4px;
+    }
+    
+    #list-container .card-body {
+      padding: 10px 8px !important;
+    }
+    
+    #list-container canvas {
+      height: 120px !important;
+    }
+    
+    #list-container .card-title {
+      font-size: 14px;
+    }
+    
+    #list-container .btn-sm {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    
+    /* 품목 관리 화면 */
+    #settings-container .table {
+      font-size: 12px;
+    }
+    
+    #settings-container .table th,
+    #settings-container .table td {
+      padding: 6px 3px;
+    }
+    
+    #settings-container .table input {
+      font-size: 13px !important;
+      padding: 4px 6px !important;
+    }
+    
+    #settings-container .btn-sm {
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+    
+    /* 모달 최적화 */
+    .modal-dialog {
+      margin: 10px;
+    }
+    
+    .modal-content {
+      border-radius: 12px;
+    }
+    
+    .modal-header {
+      padding: 12px 16px;
+    }
+    
+    .modal-body {
+      padding: 16px;
+    }
+    
+    .modal-footer {
+      padding: 12px 16px;
+    }
+    
+    .modal-footer .btn {
+      padding: 10px 16px;
+      font-size: 14px;
+    }
+  }
+
+  /* ✅ 태블릿/PC는 그대로 유지 */
   @media (min-width: 768px) {
     #right-controls { 
       width: 140px; /* 데스크탑에서도 살짝 작게 */
