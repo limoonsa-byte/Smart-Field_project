@@ -1,14 +1,31 @@
 <style>
-  /* ✅ Google Apps Script 배너 숨기기 */
+  /* ✅ Google Apps Script 배너 완전 제거 */
+  body > div:first-child[style*="e8f0fe"],
+  body > div:first-child[style*="rgb(232, 240, 254)"],
+  body > div:first-child[style*="background"],
+  div[style*="e8f0fe"],
+  div[style*="rgb(232, 240, 254)"],
   .goog-banner,
   [class*="banner"],
   [id*="banner"],
-  div[style*="background-color: rgb(232, 240, 254)"],
-  div[style*="background-color:#e8f0fe"] {
+  [class*="gb_"],
+  [id*="gb_"],
+  a[href*="script.google.com"],
+  a[href*="developers.google.com/apps-script"] {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
+    width: 0 !important;
     overflow: hidden !important;
+    position: absolute !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  
+  /* body 상단 여백 제거 (배너로 인한 여백) */
+  body {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
   }
   
   body, html { 
@@ -21,6 +38,8 @@
     -webkit-user-select: none;
     -moz-user-select: none;
     user-select: none;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .screen { 

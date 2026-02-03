@@ -11,41 +11,104 @@
   <?!= include('css'); ?>
 
   <script>
-    // ✅ Google Apps Script 배너 제거
-    document.addEventListener('DOMContentLoaded', function() {
-      // 배너 요소 찾아서 제거
-      const banners = document.querySelectorAll('[class*="banner"], [id*="banner"], [style*="e8f0fe"], [style*="rgb(232, 240, 254)"]');
-      banners.forEach(banner => {
-        if (banner.textContent && banner.textContent.includes('Google Apps Script')) {
-          banner.remove();
+    // ✅ Google Apps Script 배너 즉시 제거 (DOMContentLoaded 전에 실행)
+    (function() {
+      function removeBanner() {
+        // 모든 가능한 배너 선택자로 찾기
+        const selectors = [
+          'body > div:first-child',
+          '[class*="banner"]',
+          '[id*="banner"]',
+          '[class*="gb_"]',
+          '[id*="gb_"]',
+          'div[style*="e8f0fe"]',
+          'div[style*="rgb(232, 240, 254)"]',
+          'a[href*="script.google.com"]',
+          'a[href*="developers.google.com"]'
+        ];
+        
+        selectors.forEach(selector => {
+          try {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(el => {
+              const text = el.textContent || el.innerText || '';
+              if (text.includes('Google Apps Script') || 
+                  text.includes('애플리케이션은 Google') ||
+                  text.includes('자세히 알아보기') ||
+                  el.style.backgroundColor === 'rgb(232, 240, 254)' ||
+                  el.style.backgroundColor === '#e8f0fe') {
+                el.remove();
+                el.style.display = 'none';
+                el.style.visibility = 'hidden';
+                el.style.height = '0';
+                el.style.overflow = 'hidden';
+              }
+            });
+          } catch(e) {}
+        });
+        
+        // body의 첫 번째 자식이 배너일 가능성이 높음
+        if (document.body && document.body.firstElementChild) {
+          const firstChild = document.body.firstElementChild;
+          const text = firstChild.textContent || firstChild.innerText || '';
+          const bgColor = window.getComputedStyle(firstChild).backgroundColor;
+          if (text.includes('Google Apps Script') || 
+              text.includes('애플리케이션은 Google') ||
+              bgColor.includes('232, 240, 254') ||
+              bgColor.includes('e8f0fe')) {
+            firstChild.remove();
+            firstChild.style.display = 'none';
+          }
         }
-      });
+      }
+      
+      // 즉시 실행
+      removeBanner();
+      
+      // DOMContentLoaded 시에도 실행
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', removeBanner);
+      } else {
+        removeBanner();
+      }
       
       // 동적으로 추가되는 배너도 제거
       const observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
           mutation.addedNodes.forEach(function(node) {
-            if (node.nodeType === 1) { // Element node
-              if (node.textContent && node.textContent.includes('Google Apps Script')) {
+            if (node.nodeType === 1) {
+              const text = node.textContent || node.innerText || '';
+              const bgColor = node.style ? node.style.backgroundColor : '';
+              if (text.includes('Google Apps Script') || 
+                  text.includes('애플리케이션은 Google') ||
+                  bgColor.includes('e8f0fe') ||
+                  bgColor.includes('232, 240, 254')) {
                 node.remove();
+                node.style.display = 'none';
               }
               // 자식 요소도 확인
-              const childBanners = node.querySelectorAll('[class*="banner"], [id*="banner"]');
-              childBanners.forEach(banner => {
-                if (banner.textContent && banner.textContent.includes('Google Apps Script')) {
-                  banner.remove();
+              const children = node.querySelectorAll ? node.querySelectorAll('*') : [];
+              children.forEach(child => {
+                const childText = child.textContent || child.innerText || '';
+                if (childText.includes('Google Apps Script') || 
+                    childText.includes('애플리케이션은 Google')) {
+                  child.remove();
                 }
               });
             }
           });
         });
+        removeBanner(); // 추가로 한 번 더 확인
       });
       
-      observer.observe(document.body, {
+      observer.observe(document.body || document.documentElement, {
         childList: true,
         subtree: true
       });
-    });
+      
+      // 주기적으로도 확인 (배너가 늦게 로드될 경우 대비)
+      setInterval(removeBanner, 100);
+    })();
     
     // ✅ 화면에서 바로 에러 확인 (모바일에서도 원인 잡기 쉬움)
     window.addEventListener('error', (e) => {
