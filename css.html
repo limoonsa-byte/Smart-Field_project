@@ -399,35 +399,81 @@
       padding: 4px 6px;
     }
     
+    /* 견적내기 테이블 - 가로 스와이프 가능하도록 */
+    #estimate-container .table-responsive {
+      overflow-x: auto;
+      overflow-y: visible;
+      -webkit-overflow-scrolling: touch;
+      width: 100%;
+      display: block;
+    }
+    
     #estimate-container .table {
       font-size: 11px;
+      width: max-content;
+      min-width: 100%;
+      table-layout: auto;
     }
     
     #estimate-container .table th {
-      padding: 6px 2px;
+      padding: 8px 6px;
       font-size: 10px;
       white-space: nowrap;
+      position: sticky;
+      background: #6c757d;
+      z-index: 10;
+    }
+    
+    #estimate-container .table th:first-child {
+      left: 0;
+      z-index: 11;
     }
     
     #estimate-container .table td {
-      padding: 6px 2px;
+      padding: 8px 6px;
+      white-space: nowrap;
+    }
+    
+    /* 품목명은 두 줄로 표시 */
+    #estimate-container .table td:nth-child(2) {
+      white-space: normal;
+      word-break: break-word;
+      max-width: 150px;
+      min-width: 120px;
+      line-height: 1.3;
     }
     
     #estimate-container .table input {
       font-size: 13px !important;
-      padding: 5px 3px !important;
+      padding: 5px 4px !important;
       min-height: 34px;
+      width: 100%;
+      min-width: 80px;
     }
     
-    #estimate-container .table-responsive {
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
+    /* 체크박스는 고정 */
+    #estimate-container .table td:first-child {
+      position: sticky;
+      left: 0;
+      background: #212529;
+      z-index: 5;
+      padding: 8px 4px;
     }
     
-    /* 견적 요약 카드 */
-    #estimate-container .card-body .table td {
+    #estimate-container .table th:first-child {
+      background: #6c757d;
+    }
+    
+    /* 견적 요약 카드 (스와이프 불필요) */
+    #estimate-container .card .card-body .table {
+      width: 100% !important;
+      table-layout: auto !important;
+    }
+    
+    #estimate-container .card .card-body .table td {
       padding: 6px 8px;
       font-size: 13px;
+      white-space: normal !important;
     }
     
     /* 현장 정보 카드 */
@@ -462,19 +508,73 @@
       font-size: 12px;
     }
     
-    /* 품목 관리 화면 */
-    #settings-container .table {
-      font-size: 12px;
+    /* 품목 관리 화면 - 가로 스와이프 가능하도록 */
+    #settings-container .table-responsive {
+      overflow-x: auto;
+      overflow-y: visible;
+      -webkit-overflow-scrolling: touch;
+      width: 100%;
+      display: block;
     }
     
-    #settings-container .table th,
+    #settings-container .table {
+      font-size: 12px;
+      width: max-content;
+      min-width: 100%;
+      table-layout: auto;
+    }
+    
+    #settings-container .table th {
+      padding: 8px 6px;
+      font-size: 11px;
+      white-space: nowrap;
+      position: sticky;
+      background: #6c757d;
+      z-index: 10;
+    }
+    
+    #settings-container .table th:first-child {
+      left: 0;
+      z-index: 11;
+      background: #6c757d;
+    }
+    
     #settings-container .table td {
-      padding: 6px 3px;
+      padding: 8px 6px;
+      white-space: nowrap;
+    }
+    
+    /* No 컬럼은 고정 */
+    #settings-container .table td:first-child {
+      position: sticky;
+      left: 0;
+      background: #212529;
+      z-index: 5;
+      padding: 8px 4px;
+      text-align: center;
+    }
+    
+    /* 품목명은 두 줄로 표시 */
+    #settings-container .table td:nth-child(2) {
+      white-space: normal;
+      word-break: break-word;
+      max-width: 120px;
+      min-width: 100px;
+      line-height: 1.3;
+    }
+    
+    /* 규격 컬럼은 가로 스와이프로 볼 수 있도록 */
+    #settings-container .table td:nth-child(3) {
+      min-width: 120px;
+      white-space: normal;
+      word-break: break-word;
     }
     
     #settings-container .table input {
       font-size: 13px !important;
-      padding: 4px 6px !important;
+      padding: 5px 4px !important;
+      width: 100%;
+      min-width: 80px;
     }
     
     #settings-container .btn-sm {
