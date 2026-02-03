@@ -1317,6 +1317,7 @@ function exportEstimatePDF() {
     byCategory[item.category].push(item);
   });
   
+  // 세부 내역용 rows (기존 방식 유지)
   let no = 0;
   let rows = '';
   categoryOrder.forEach(function(cat) {
@@ -1341,6 +1342,28 @@ function exportEstimatePDF() {
         '</tr>';
     });
     rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
+  });
+  
+  // 표지용 간단한 공정별 목록
+  let coverNo = 0;
+  let coverRows = '';
+  categoryOrder.forEach(function(cat) {
+    const items = byCategory[cat];
+    if (!items || items.length === 0) return;
+    let catSum = 0;
+    items.forEach(function(item) {
+      coverNo++;
+      catSum += Number(item.totalAmount) || 0;
+      coverRows += '<tr>' +
+        '<td class="text-center">' + coverNo + '</td>' +
+        '<td>' + escapeHtml(item.item) + '</td>' +
+        '<td class="text-center">' + item.unit + '</td>' +
+        '<td class="text-end">' + Number(item.qty) + '</td>' +
+        '<td class="text-end">' + Number(item.totalAmount).toLocaleString() + '</td>' +
+        '<td></td>' +
+        '</tr>';
+    });
+    coverRows += '<tr class="cover-category-subtotal"><td colspan="4" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '</strong></td><td></td></tr>';
   });
   
   // 작성일 포맷
@@ -1388,12 +1411,6 @@ function exportEstimatePDF() {
     return result + '원정';
   }
   
-  // 공사금액 조정계 (십만단위 절삭)
-  const adjustedAmount = Math.floor(totals.total / 100000) * 100000;
-  // VAT 포함금액 (단위 절삭)
-  const vatIncludedAmount = Math.floor((adjustedAmount * 1.1) / 1000) * 1000;
-  
-  const totalKorean = numberToKorean(vatIncludedAmount);
   
   const html = `<!DOCTYPE html>
 <html lang="ko">
@@ -1404,17 +1421,16 @@ function exportEstimatePDF() {
     body { font-family: Malgun Gothic, sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
     .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; position: relative; }
     .attachment-label { position: absolute; top: 12mm; left: 12mm; font-size: 0.9em; color: #666; }
-    .cover-title { font-size: 3em; font-weight: bold; text-align: center; margin: 30px 0 40px 0; letter-spacing: 0.1em; }
-    .header-info { display: flex; justify-content: space-between; margin-bottom: 30px; }
-    .header-left { flex: 1; }
-    .header-right { text-align: right; font-size: 0.95em; line-height: 1.8; }
-    .project-name { font-size: 1.2em; margin-bottom: 20px; }
-    .project-name-label { font-weight: bold; margin-right: 10px; }
-    .amount-section { margin: 30px 0; padding: 20px; border: 2px solid #000; }
-    .amount-korean { font-size: 1.3em; font-weight: bold; margin-bottom: 8px; }
-    .amount-number { font-size: 1.1em; margin-bottom: 5px; }
-    .amount-vat { font-size: 0.9em; color: #d00; display: inline-block; margin-left: 10px; }
-    .date-section { text-align: right; margin-bottom: 20px; font-size: 1em; }
+    .cover-title { font-size: 2em; font-weight: bold; text-align: center; margin: 20px 0 25px 0; letter-spacing: 0.1em; }
+    .cover-project-name { font-size: 1.1em; margin-bottom: 15px; }
+    .cover-project-label { font-weight: bold; margin-right: 10px; }
+    .cover-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 10pt; }
+    .cover-table th, .cover-table td { border: 1px solid #333; padding: 6px 8px; text-align: center; }
+    .cover-table th { background: #eee; font-weight: bold; }
+    .cover-table td.text-end { text-align: right; }
+    .cover-category-subtotal { background: #f5f5f5; font-weight: bold; }
+    .cover-total-row { background: #e6f3ff; font-weight: bold; font-size: 1.05em; }
+    .cover-date-section { text-align: right; margin-top: 20px; font-size: 0.95em; }
     .page-watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 8em; color: rgba(0,0,0,0.05); font-weight: bold; pointer-events: none; z-index: -1; }
     h1 { font-size: 1.4em; margin: 0 0 6px 0; }
     .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
@@ -1443,30 +1459,40 @@ function exportEstimatePDF() {
   </style>
 </head>
 <body>
-<!-- 표지 (갑지) - 이미지 양식 -->
+<!-- 표지 (갑지) -->
 <div class="sheet" style="page-break-after: always;">
   <div class="attachment-label">별첨1</div>
   <div class="page-watermark">1 페이지</div>
   
   <div class="cover-title">견 적 서</div>
   
-  <div class="header-info">
-    <div class="header-left">
-      <div class="project-name">
-        <span class="project-name-label">공사 명 :</span> ${escapeHtml(estimateSettings.siteName || '-')}
-      </div>
-      <div class="amount-section">
-        <div class="amount-korean">공사금액: ${totalKorean}</div>
-        <div class="amount-number">₩${vatIncludedAmount.toLocaleString()}<span class="amount-vat">(VAT 포함)</span></div>
-      </div>
-      <div class="date-section">
-        <span style="font-weight: bold;">견적일시:</span> ${writeDate}
-      </div>
-    </div>
-    <div class="header-right">
-      <div>부산광역시 남구 용소로19번길 34 2층</div>
-      <div>TEL : 010.7434.1322</div>
-    </div>
+  <div class="cover-project-name">
+    <span class="cover-project-label">공사 명 :</span> ${escapeHtml(estimateSettings.siteName || '-')}
+  </div>
+  
+  <table class="cover-table">
+    <thead>
+      <tr>
+        <th style="width: 8%;">순번</th>
+        <th style="width: 40%;">품목</th>
+        <th style="width: 10%;">단위</th>
+        <th style="width: 10%;">수량</th>
+        <th style="width: 20%;">금액</th>
+        <th style="width: 12%;">비고</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${coverRows}
+      <tr class="cover-total-row">
+        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">총액 (VAT 별도)</td>
+        <td class="text-end">${totals.total.toLocaleString()}</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  
+  <div class="cover-date-section">
+    <span style="font-weight: bold;">견적일시:</span> ${writeDate}
   </div>
 </div>
 
