@@ -1421,22 +1421,15 @@ function exportEstimatePDF() {
     .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; position: relative; }
     .attachment-label { position: absolute; top: 12mm; left: 12mm; font-size: 0.9em; color: #666; }
     .cover-title { font-size: 2em; font-weight: bold; text-align: center; margin: 20px 0 25px 0; letter-spacing: 0.1em; }
-    .cover-project-name { font-size: 1.1em; margin-bottom: 15px; }
+    .cover-project-name { font-size: 1.1em; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
     .cover-project-label { font-weight: bold; margin-right: 10px; }
+    .cover-date-section { font-size: 0.95em; }
     .cover-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 10pt; }
     .cover-table th, .cover-table td { border: 1px solid #333; padding: 6px 8px; text-align: center; }
     .cover-table th { background: #eee; font-weight: bold; }
     .cover-table td.text-end { text-align: right; }
     .cover-category-subtotal { background: #f5f5f5; font-weight: bold; }
     .cover-total-row { background: #e6f3ff; font-weight: bold; font-size: 1.05em; }
-    .cover-summary { margin-top: 20px; }
-    .cover-summary table { width: 100%; border-collapse: collapse; font-size: 10pt; }
-    .cover-summary td { border: none; padding: 4px 6px; text-align: right; }
-    .cover-summary td.text-left { text-align: left; }
-    .cover-summary .total-row { font-weight: bold; font-size: 1.1em; }
-    .cover-summary .total-value { font-weight: bold; font-size: 1.2em; }
-    .cover-summary .total-unit { display: block; font-size: 0.9em; margin-top: 2px; }
-    .cover-date-section { text-align: right; margin-top: 20px; font-size: 0.95em; }
     .page-watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 8em; color: rgba(0,0,0,0.05); font-weight: bold; pointer-events: none; z-index: -1; }
     h1 { font-size: 1.4em; margin: 0 0 6px 0; }
     .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
@@ -1473,7 +1466,12 @@ function exportEstimatePDF() {
   <div class="cover-title">견 적 서</div>
   
   <div class="cover-project-name">
-    <span class="cover-project-label">공사 명 :</span> ${escapeHtml(estimateSettings.siteName || '-')}
+    <div>
+      <span class="cover-project-label">공사 명 :</span> ${escapeHtml(estimateSettings.siteName || '-')}
+    </div>
+    <div class="cover-date-section">
+      <span style="font-weight: bold;">견적일시:</span> ${writeDate}
+    </div>
   </div>
   
   <table class="cover-table">
@@ -1489,40 +1487,36 @@ function exportEstimatePDF() {
     </thead>
     <tbody>
       ${coverRows}
+      <tr>
+        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">소계</td>
+        <td class="text-end">${totals.subtotal.toLocaleString()}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">공과잡비(5%)</td>
+        <td class="text-end">${totals.overhead.toLocaleString()}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">이윤(10%)</td>
+        <td class="text-end">${totals.profit.toLocaleString()}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">조정액</td>
+        <td class="text-end">${totals.adjusted.toLocaleString()}</td>
+        <td></td>
+      </tr>
+      <tr class="cover-total-row">
+        <td colspan="4" class="text-left" style="text-align: left; padding-left: 10px;"><strong>총액 (VAT 별도)</strong></td>
+        <td class="text-end" style="vertical-align: top;">
+          <strong>${totals.total.toLocaleString()}</strong>
+          <div style="font-size: 0.9em; margin-top: 2px;">원</div>
+        </td>
+        <td></td>
+      </tr>
     </tbody>
   </table>
-  
-  <div class="cover-summary">
-    <table>
-      <tr>
-        <td colspan="4" class="text-end">소계</td>
-        <td class="text-end">${totals.subtotal.toLocaleString()}원</td>
-      </tr>
-      <tr>
-        <td colspan="4" class="text-end">공과잡비(5%)</td>
-        <td class="text-end">${totals.overhead.toLocaleString()}원</td>
-      </tr>
-      <tr>
-        <td colspan="4" class="text-end">이윤(10%)</td>
-        <td class="text-end">${totals.profit.toLocaleString()}원</td>
-      </tr>
-      <tr>
-        <td colspan="4" class="text-end">조정액</td>
-        <td class="text-end">${totals.adjusted.toLocaleString()}원</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="4" class="text-left">총액 (VAT 별도)</td>
-        <td class="text-end">
-          <span class="total-value">${totals.total.toLocaleString()}</span>
-          <span class="total-unit">원</span>
-        </td>
-      </tr>
-    </table>
-  </div>
-  
-  <div class="cover-date-section">
-    <span style="font-weight: bold;">견적일시:</span> ${writeDate}
-  </div>
 </div>
 
 <!-- 세부 내역 -->
