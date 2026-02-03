@@ -1,0 +1,1484 @@
+<script>
+// =========================
+// 전역 변수
+// =========================
+let priceTables = {}; // 단가표 전체 { "공정명": [ {품목, 규격, 단위, 재료비, 노무비}, ... ] }
+let currentDrawing = null; // 현재 도면 데이터
+let estimateItems = []; // 견적 항목들
+let estimateSettings = {
+  siteName: '',
+  area: 0, // 평수
+  overheadRate: 5, // 공과잡비 (%)
+  profitRate: 10, // 이윤 (%)
+  vatRate: 10 // VAT (%)
+};
+let drawingList = []; // 도면 목록
+
+// =========================
+// ✅ 견적서 화면 초기화 (화면 진입 시)
+// =========================
+function initEstimateScreen() {
+  const container = document.getElementById('estimate-container');
+  if (!container) return;
+  
+  // 저장된 견적 확인
+  const savedEstimate = localStorage.getItem('currentEstimate');
+  if (savedEstimate) {
+    try {
+      const data = JSON.parse(savedEstimate);
+      currentDrawing = data.drawing;
+      estimateItems = data.items;
+      estimateSettings = data.settings;
+      priceTables = data.priceTables || {};
+      
+      // 단가표가 없으면 로드
+      if (Object.keys(priceTables).length === 0) {
+        loadPriceTables();
+      } else {
+        renderEstimateUI();
+      }
+      return;
+    } catch (e) {
+      console.error('저장된 견적 복원 실패:', e);
+    }
+  }
+  
+  // 초기 화면: 도면 선택 버튼 표시
+  container.innerHTML = `
+    <div class="text-center mt-5">
+      <h3 class="text-white mb-4">
+        <i class="bi bi-calculator-fill"></i> 견적서 작성
+      </h3>
+      <p class="text-secondary mb-4">
+        견적서를 작성할 도면을 선택하세요
+      </p>
+      <button class="btn btn-primary btn-lg" onclick="showDrawingListModal()">
+        <i class="bi bi-folder2-open"></i> 도면 선택
+      </button>
+    </div>
+  `;
+  
+  // 모달 DOM 생성
+  if (!document.getElementById('drawingListModal')) {
+    createDrawingListModal();
+  }
+}
+
+// =========================
+// ✅ 도면 목록 모달 표시
+// =========================
+function showDrawingListModal() {
+  const modal = new bootstrap.Modal(document.getElementById('drawingListModal'));
+  modal.show();
+  
+  const listDiv = document.getElementById('drawingListContent');
+  if (!listDiv) return;
+  
+  listDiv.innerHTML = `
+    <div class="text-center p-3">
+      <div class="spinner-border text-primary"></div>
+      <p class="mt-2">도면 목록을 불러오는 중...</p>
+    </div>
+  `;
+  
+  if (window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(renderDrawingList)
+      .withFailureHandler(err => {
+        listDiv.innerHTML = `
+          <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> 불러오기 실패<br>
+            <small>${err.message || err}</small>
+          </div>
+        `;
+      })
+      .getData();
+  } else {
+    listDiv.innerHTML = `
+      <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> 테스트 모드: 서버 연결 없음
+      </div>
+    `;
+  }
+}
+
+// =========================
+// ✅ 도면 목록 렌더링
+// =========================
+function renderDrawingList(jsonString) {
+  try {
+    drawingList = JSON.parse(jsonString || '[]');
+  } catch (e) {
+    drawingList = [];
+  }
+  
+  const listDiv = document.getElementById('drawingListContent');
+  if (!listDiv) return;
+  
+  if (drawingList.length === 0) {
+    listDiv.innerHTML = `
+      <div class="text-center p-3 text-secondary">
+        저장된 도면이 없습니다.<br>
+        먼저 도면을 그리고 저장하세요.
+      </div>
+    `;
+    return;
+  }
+  
+  let html = '<div class="list-group">';
+  
+  drawingList.forEach((drawing, idx) => {
+    const date = drawing.date ? String(drawing.date).substring(0, 10) : '날짜미상';
+    const siteName = drawing.siteName || '현장명 미지정';
+    const height = drawing.height || 2300;
+    
+    html += `
+      <button type="button" class="list-group-item list-group-item-action" onclick="selectDrawingForEstimate(${idx})">
+        <div class="d-flex w-100 justify-content-between align-items-center">
+          <div>
+            <h6 class="mb-1 fw-bold">${siteName}</h6>
+            <small class="text-muted">
+              <i class="bi bi-calendar"></i> ${date} | 
+              <i class="bi bi-rulers"></i> 천장고 ${height}mm
+            </small>
+          </div>
+          <i class="bi bi-chevron-right"></i>
+        </div>
+      </button>
+    `;
+  });
+  
+  html += '</div>';
+  listDiv.innerHTML = html;
+}
+
+// =========================
+// ✅ 도면 선택 (견적서 작성 시작)
+// =========================
+function selectDrawingForEstimate(index) {
+  const selectedDrawing = drawingList[index];
+  
+  // 모달 닫기
+  const modal = bootstrap.Modal.getInstance(document.getElementById('drawingListModal'));
+  if (modal) modal.hide();
+  
+  // 견적서 초기화
+  initEstimateFromDrawing(selectedDrawing);
+}
+
+// =========================
+// ✅ 도면 목록 모달 DOM 생성
+// =========================
+function createDrawingListModal() {
+  const modalHTML = `
+    <div class="modal fade" id="drawingListModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark text-white border-secondary">
+          <div class="modal-header border-secondary">
+            <h5 class="modal-title">
+              <i class="bi bi-folder2-open"></i> 도면 선택
+            </h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+            <div id="drawingListContent"></div>
+          </div>
+          <div class="modal-footer border-secondary">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// =========================
+// ✅ 도면에서 견적서 초기화
+// =========================
+function initEstimateFromDrawing(drawingData) {
+  currentDrawing = drawingData;
+  estimateItems = [];
+  
+  estimateSettings.siteName = drawingData.siteName || '현장명 미지정';
+  
+  // 평수 계산 (구역 면적 합계)
+  let totalArea = 0;
+  if (drawingData.zones) {
+    drawingData.zones.forEach(z => {
+      if (z.area) totalArea += Number(z.area);
+    });
+  }
+  estimateSettings.area = Math.round(totalArea / 3.3 * 10) / 10; // m² → 평 (소수점 1자리)
+  
+  // 단가표 로드
+  loadPriceTables();
+}
+
+// =========================
+// ✅ 단가표 로드
+// =========================
+function loadPriceTables() {
+  const container = document.getElementById('estimate-container');
+  if (!container) return;
+  
+  container.innerHTML = `
+    <div class="text-center text-white mt-5">
+      <div class="spinner-border text-primary mb-3"></div>
+      <h5>단가표를 불러오는 중...</h5>
+    </div>
+  `;
+  
+  if (window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(onPriceTablesLoaded)
+      .withFailureHandler(err => {
+        container.innerHTML = `
+          <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle"></i> 단가표 로드 실패<br>
+            <small>${err.message || err}</small>
+          </div>
+        `;
+      })
+      .getAllPriceTables();
+  } else {
+    // 테스트 모드
+    container.innerHTML = `
+      <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> 테스트 모드: 서버 연결 없음
+      </div>
+    `;
+  }
+}
+
+// =========================
+// ✅ 단가표 로드 완료
+// =========================
+function onPriceTablesLoaded(jsonString) {
+  try {
+    priceTables = JSON.parse(jsonString);
+    
+    // UI 렌더링 (수량은 렌더링 시 실시간 계산)
+    renderEstimateUI();
+  } catch (e) {
+    const container = document.getElementById('estimate-container');
+    if (container) {
+      container.innerHTML = `
+        <div class="alert alert-danger">
+          <i class="bi bi-exclamation-triangle"></i> 단가표 파싱 실패<br>
+          <small>${e.message}</small>
+        </div>
+      `;
+    }
+  }
+}
+
+// =========================
+// ✅ 도면 자동 분석 (수량 계산만, 자동 체크 안 함)
+// =========================
+function analyzeDrawing() {
+  // 자동 체크 기능 비활성화 - 사용자가 직접 체크하도록 함
+  // 수량 계산은 renderEstimateUI에서 실시간으로 수행
+  return;
+  
+  // 구역별 면적 및 둘레 계산
+  let bathroomArea = 0;      // 욕실 바닥 면적
+  let bathroomPerimeter = 0; // 욕실 둘레
+  let bathroomCount = 0;     // 욕실 개수
+  let verandaArea = 0;       // 베란다 면적
+  let entranceArea = 0;      // 현관 면적
+  
+  if (currentDrawing.zones) {
+    currentDrawing.zones.forEach((z, idx) => {
+      const area = Number(z.area) || 0;
+      const name = (z.name || '').trim();
+      
+      // 욕실
+      if (name.startsWith('욕실')) {
+        bathroomCount++;
+        bathroomArea += area;
+        
+        // 둘레 계산
+        if (z.pts && z.pts.length >= 2) {
+          for (let i = 0; i < z.pts.length; i++) {
+            const p1 = z.pts[i];
+            const p2 = z.pts[(i + 1) % z.pts.length];
+            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y) / 1000; // mm → m
+            bathroomPerimeter += dist;
+          }
+        }
+      }
+      
+      // 베란다 (발코니)
+      if (name.startsWith('발코니') || name.startsWith('베란다')) {
+        verandaArea += area;
+      }
+      
+      // 현관
+      if (name.startsWith('현관')) {
+        entranceArea += area;
+      }
+    });
+  }
+  
+  // 1. 화장실 집기철거 (욕실 개수)
+  if (bathroomCount > 0) {
+    addEstimateItem('가설철거', '화장실 집기철거', '탁월제외', '개소', bathroomCount, 0, 80000);
+  }
+  
+  // 2. 화장실 타일제거 (욕실 바닥 + 벽면 - 문)
+  if (bathroomArea > 0) {
+    const heightInMeters = height / 1000; // mm → m
+    const doorArea = 0.9 * 2.1 * bathroomCount; // 문 면적 (0.9m × 2.1m × 욕실개수)
+    const tileArea = bathroomArea + (bathroomPerimeter * heightInMeters) - doorArea;
+    if (tileArea > 0) {
+      addEstimateItem('가설철거', '화장실 타일제거', '방수전까지', 'm²', tileArea, 0, 40000);
+    }
+  }
+  
+  // 4. 마루철거 (전체 - 베란다 - 욕실 - 현관)
+  const flooringArea = totalArea - bathroomArea - verandaArea - entranceArea;
+  const flooringPyeong = flooringArea / 3.3;
+  if (flooringPyeong > 0) {
+    addEstimateItem('가설철거', '마루철거', '', '평', flooringPyeong, 0, 30000);
+    
+    // 대코타일철거 (마루철거와 동일)
+    addEstimateItem('가설철거', '대코타일철거', '', '평', flooringPyeong, 0, 25000);
+    
+    // 장판철거 (마루철거와 동일)
+    addEstimateItem('가설철거', '장판철거', '', '평', flooringPyeong, 0, 8000);
+    
+  }
+  
+  // 5. 타일철거 (베란다 + 현관)
+  const tileRemovalArea = verandaArea + entranceArea;
+  if (tileRemovalArea > 0) {
+    addEstimateItem('가설철거', '타일철거', '', 'm²', tileRemovalArea, 0, 35000);
+  }
+  
+  // 6. 붙박이장철거 (도면 붙박이장 길이 → 자, 1자=30cm)
+  let closetLength = 0;
+  if (currentDrawing.furnitureLines) {
+    currentDrawing.furnitureLines.forEach(f => {
+      if (f.type === 'closet') {
+        const len = Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000; // mm → m
+        closetLength += len;
+      }
+    });
+  }
+  if (closetLength > 0) {
+    const closetJa = Math.ceil(closetLength / 0.3); // m → 자 (1자 = 30cm)
+    addEstimateItem('가설철거', '붙박이장철거', '30cm', '자', closetJa, 0, 9000);
+  }
+  
+  // 7. 신발장철거 (도면의 신발장 길이)
+  let shoesLength = 0;
+  if (currentDrawing.furnitureLines) {
+    currentDrawing.furnitureLines.forEach(f => {
+      if (f.type === 'shoes') {
+        const len = Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000; // mm → m
+        shoesLength += len;
+      }
+    });
+  }
+  if (shoesLength > 0) {
+    const shoesJa = shoesLength / 0.3; // 1자 = 30cm
+    addEstimateItem('가설철거', '신발장철거', '30cm', '자', shoesJa, 0, 9000);
+  }
+  
+  // 8. 몰딩, 걸레받이철거 (전체 평수)
+  if (totalPyeong > 0) {
+    addEstimateItem('가설철거', '몰딩, 걸레받이철거', '', '평', totalPyeong, 0, 6500);
+  }
+  
+  // 9. 싱크대철거 (도면의 싱크대 길이)
+  let sinkLength = 0;
+  if (currentDrawing.furnitureLines) {
+    currentDrawing.furnitureLines.forEach(f => {
+      if (f.type === 'sink') {
+        const len = Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000; // mm → m
+        sinkLength += len;
+      }
+    });
+  }
+  if (sinkLength > 0) {
+    const sinkJa = Math.round(sinkLength / 0.3); // 1자 = 30cm, 반올림
+    addEstimateItem('가설철거', '싱크대철거', '30cm', '자', sinkJa, 0, 9000);
+  }
+  
+  // 10. 방문 관련 철거 (도면의 방문 개수)
+  let roomDoorCount = 0;
+  let middleDoorCount = 0;
+  if (currentDrawing.doors) {
+    currentDrawing.doors.forEach(door => {
+      const type = door.doorType || 'room';
+      if (type === 'room') {
+        roomDoorCount++;
+      } else if (type === 'middle') {
+        middleDoorCount++;
+      }
+    });
+  }
+  
+  if (roomDoorCount > 0) {
+    // 방문철거
+    addEstimateItem('가설철거', '방문철거', '', '개', roomDoorCount, 0, 12000);
+    // 방문+문틀철거
+    addEstimateItem('가설철거', '방문+문틀철거', '', '개소', roomDoorCount, 0, 30000);
+    // 문지방 철거
+    addEstimateItem('가설철거', '문지방 철거', '미장까지', '개', roomDoorCount, 0, 35000);
+  }
+  
+  // 11. 중문철거
+  if (middleDoorCount > 0) {
+    addEstimateItem('가설철거', '중문철거', '', '개', middleDoorCount, 0, 50000);
+  }
+  
+  // 1. 구역별 면적 계산
+  if (currentDrawing.zones) {
+    currentDrawing.zones.forEach((zone, idx) => {
+      const area = Number(zone.area) || 0;
+      const pyeong = area / 3.3;
+      
+      // 천장공사 (m²)
+      addEstimateItem('목공사', '천장공사', '', 'm²', area, 15000, 16000);
+      
+      // 도배 (평)
+      addEstimateItem('도배필름공사', '도배', '', '평', pyeong, 7000, 8000);
+      
+      // 바닥공사 (평) - 기본값: 강마루
+      addEstimateItem('바닥공사', '강마루', '동화 나투스전', '평', pyeong, 98000, 18000);
+    });
+  }
+  
+  // 2. 벽체 길이 계산
+  let totalWallLength = 0;
+  
+  // 구역 둘레
+  if (currentDrawing.zones) {
+    currentDrawing.zones.forEach(z => {
+      if (!z.pts || z.pts.length < 2) return;
+      for (let i = 0; i < z.pts.length; i++) {
+        const p1 = z.pts[i];
+        const p2 = z.pts[(i + 1) % z.pts.length];
+        totalWallLength += Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      }
+    });
+  }
+  
+  // 기타 벽체
+  if (currentDrawing.freeWalls) {
+    currentDrawing.freeWalls.forEach(wall => {
+      if (!wall || wall.length < 2) return;
+      for (let i = 0; i < wall.length - 1; i++) {
+        totalWallLength += Math.hypot(wall[i + 1].x - wall[i].x, wall[i + 1].y - wall[i].y);
+      }
+    });
+  }
+  
+  // 벽체공사 (m²) - 사용자가 양면/단면 선택 필요 (기본: 양면)
+  if (totalWallLength > 0) {
+    const wallArea = (totalWallLength / 1000) * (height / 1000);
+    addEstimateItem('목공사', '양면벽체공사', '', 'm²', wallArea, 17000, 19000);
+  }
+  
+  // 3. 문 개수 (타입별 분류)
+  if (currentDrawing.doors && currentDrawing.doors.length > 0) {
+    // 타입별로 분류
+    const doorsByType = {
+      room: 0,      // 방문
+      entrance: 0,  // 현관문
+      veranda: 0,   // 베란다문
+      middle: 0     // 중문
+    };
+    
+    currentDrawing.doors.forEach(door => {
+      const type = door.doorType || 'room';
+      if (doorsByType.hasOwnProperty(type)) {
+        doorsByType[type]++;
+      } else {
+        doorsByType.room++; // 기본값
+      }
+    });
+    
+    // 방문
+    if (doorsByType.room > 0) {
+      addEstimateItem('목공사', '문+문틀시공', '100박 백골(손잡이,경첩포함)', '개', doorsByType.room, 270000, 65000);
+    }
+    
+    // 현관문
+    if (doorsByType.entrance > 0) {
+      addEstimateItem('목공사', '현관문+문틀시공', '현관용', '개', doorsByType.entrance, 450000, 80000);
+    }
+    
+    // 베란다문
+    if (doorsByType.veranda > 0) {
+      addEstimateItem('목공사', '베란다문+문틀시공', '베란다용', '개', doorsByType.veranda, 350000, 70000);
+    }
+    
+    // 중문
+    if (doorsByType.middle > 0) {
+      addEstimateItem('목공사', '중문 슬림 도어', '높이2100', '개', doorsByType.middle, 1200000, 200000);
+    }
+  }
+  
+  // 4. 가구
+  if (currentDrawing.furnitureLines) {
+    let sinkLength = 0;
+    let closetLength = 0;
+    
+    currentDrawing.furnitureLines.forEach(f => {
+      if (!f) return;
+      const len = Number(f.len) || Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y);
+      const ja = (len / 1000) / 0.3; // mm → 자 (1자 = 30cm)
+      
+      if (f.type === 'sink') {
+        sinkLength += ja;
+      } else if (f.type === 'closet') {
+        closetLength += ja;
+      }
+    });
+    
+    if (sinkLength > 0) {
+      addEstimateItem('싱크가구공사', '싱크대', '기본후드포함', '자(30cm)', sinkLength, 180000, 0);
+    }
+    
+    if (closetLength > 0) {
+      addEstimateItem('싱크가구공사', '붙박이장', '자(30cm)', '', closetLength, 110000, 0);
+    }
+  }
+}
+
+// =========================
+// ✅ 도면 기반 수량 계산 (체크 안 된 항목용)
+// =========================
+function calculateItemQuantity(category, priceItem, drawing) {
+  if (!drawing) return 1;
+  
+  const height = Number(drawing.height) || 2300;
+  const zones = drawing.zones || [];
+  const doors = drawing.doors || [];
+  const furnitureLines = drawing.furnitureLines || [];
+  
+  // 전체 면적 계산
+  let totalArea = 0;
+  zones.forEach(z => {
+    if (z.area) totalArea += Number(z.area);
+  });
+  const totalPyeong = totalArea / 3.3;
+  
+  // 구역별 면적
+  let bathroomArea = 0, bathroomPerimeter = 0, bathroomCount = 0;
+  let verandaArea = 0, entranceArea = 0;
+  
+  zones.forEach(z => {
+    const area = Number(z.area) || 0;
+    const name = (z.name || '').trim();
+    
+    if (name.startsWith('욕실')) {
+      bathroomCount++;
+      bathroomArea += area;
+      if (z.pts && z.pts.length >= 2) {
+        for (let i = 0; i < z.pts.length; i++) {
+          const p1 = z.pts[i];
+          const p2 = z.pts[(i + 1) % z.pts.length];
+          bathroomPerimeter += Math.hypot(p2.x - p1.x, p2.y - p1.y) / 1000;
+        }
+      }
+    }
+    if (name.startsWith('발코니') || name.startsWith('베란다')) verandaArea += area;
+    if (name.startsWith('현관')) entranceArea += area;
+  });
+  
+  const item = priceItem.item;
+  const spec = priceItem.spec || '';
+  
+  // 가설철거 항목들
+  if (category === '가설철거') {
+    if (item === '먹메김/내부 수평비계') return Math.ceil(totalArea);
+    if (item === '보양/현장 정리작업') return Math.ceil(totalArea);
+    if (item === '공사중폐자재반출') return 2;
+    if (item === '전체철거') return Math.ceil(totalPyeong);
+    if (item === '조명철거') return Math.ceil(totalPyeong);
+    if (item === '화장실 집기철거' || item === '화장실 집기물철거' || item === '화장실 집기류철거') return Math.ceil(bathroomCount);
+    if (item === '화장실 타일제거' && bathroomArea > 0) {
+      const heightInMeters = height / 1000;
+      const doorArea = 0.9 * 2.1 * bathroomCount;
+      const tileArea = bathroomArea + (bathroomPerimeter * heightInMeters) - doorArea;
+      return Math.ceil(tileArea);
+    }
+    if (item === '마루철거' || item === '대코타일철거' || item === '장판철거') {
+      const flooringArea = totalArea - bathroomArea - verandaArea - entranceArea;
+      return Math.ceil(flooringArea / 3.3);
+    }
+    if (item === '타일철거') return Math.ceil(verandaArea + entranceArea);
+    // 붙박이장 철거: 도면 붙박이장 길이 → 자 (1자 = 30cm)
+    if (item === '불박이장철거' || item === '붙박이장철거') {
+      let lenM = 0;
+      furnitureLines.forEach(f => {
+        if (f.type === 'closet') {
+          lenM += Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000; // mm → m
+        }
+      });
+      return Math.ceil(lenM / 0.3); // m → 자 (1자 = 30cm)
+    }
+    if (item === '신발장철거') {
+      let len = 0;
+      furnitureLines.forEach(f => {
+        if (f.type === 'shoes') len += Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000;
+      });
+      return Math.ceil(len / 0.3);
+    }
+    if (item === '몰딩, 걸레받이철거') return Math.ceil(totalPyeong);
+    if (item === '싱크대철거') {
+      let len = 0;
+      furnitureLines.forEach(f => {
+        if (f.type === 'sink') len += Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000;
+      });
+      return Math.round(len / 0.3);
+    }
+    if (item === '방문철거' || item === '방문+문틀철거' || item === '문지방 철거') {
+      return doors.filter(d => (d.doorType || 'room') === 'room').length;
+    }
+    if (item === '중문철거') {
+      return doors.filter(d => (d.doorType || '') === 'middle').length;
+    }
+    if (item === '베란다문 철거') {
+      return doors.filter(d => (d.doorType || '') === 'veranda').length;
+    }
+  }
+  
+  return 1; // 기본값
+}
+
+// =========================
+// ✅ 견적 항목 추가
+// =========================
+function addEstimateItem(category, item, spec, unit, qty, materialPrice, laborPrice) {
+  const finalQty = Math.ceil(qty); // 무조건 올림
+  estimateItems.push({
+    category: category,
+    item: item,
+    spec: spec,
+    unit: unit,
+    qty: finalQty,
+    materialPrice: materialPrice,
+    laborPrice: laborPrice,
+    materialAmount: Math.round(finalQty * materialPrice),
+    laborAmount: Math.round(finalQty * laborPrice),
+    totalAmount: Math.round(finalQty * (materialPrice + laborPrice))
+  });
+}
+
+// =========================
+// ✅ 현재 견적 자동 저장
+// =========================
+function saveCurrentEstimate() {
+  try {
+    const data = {
+      drawing: currentDrawing,
+      items: estimateItems,
+      settings: estimateSettings,
+      priceTables: priceTables
+    };
+    localStorage.setItem('currentEstimate', JSON.stringify(data));
+  } catch (e) {
+    console.error('견적 저장 실패:', e);
+  }
+}
+
+// =========================
+// ✅ 아코디언 상태 저장
+// =========================
+function saveAccordionState() {
+  const openAccordions = [];
+  document.querySelectorAll('.accordion-collapse.show').forEach(el => {
+    openAccordions.push(el.id);
+  });
+  sessionStorage.setItem('openAccordions', JSON.stringify(openAccordions));
+}
+
+// =========================
+// ✅ 아코디언 상태 복원
+// =========================
+function restoreAccordionState() {
+  try {
+    const openAccordions = JSON.parse(sessionStorage.getItem('openAccordions') || '[]');
+    
+    // 모든 아코디언 닫기
+    document.querySelectorAll('.accordion-collapse').forEach(el => {
+      el.classList.remove('show');
+    });
+    document.querySelectorAll('.accordion-button').forEach(btn => {
+      btn.classList.add('collapsed');
+    });
+    
+    // 저장된 아코디언만 열기
+    openAccordions.forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.classList.add('show');
+        const button = document.querySelector(`[data-bs-target="#${id}"]`);
+        if (button) button.classList.remove('collapsed');
+      }
+    });
+  } catch (e) {
+    console.error('아코디언 상태 복원 실패:', e);
+  }
+}
+
+// =========================
+// ✅ UI 렌더링 (체크박스 기반)
+// =========================
+function renderEstimateUI() {
+  const container = document.getElementById('estimate-container');
+  if (!container) return;
+  
+  const totals = calculateTotals();
+  
+  // 구역별 개수 (상단 표시용)
+  const zones = currentDrawing && currentDrawing.zones ? currentDrawing.zones : [];
+  const zoneCounts = {
+    욕실: zones.filter(z => (z.name || '').trim().startsWith('욕실')).length,
+    현관: zones.filter(z => (z.name || '').trim().startsWith('현관')).length,
+    발코니: zones.filter(z => {
+      const n = (z.name || '').trim();
+      return n.startsWith('발코니') || n.startsWith('베란다');
+    }).length,
+    방: zones.filter(z => {
+      const n = (z.name || '').trim();
+      return n === '방' || (n.startsWith('방') && n.length > 1) || n.startsWith('안방');
+    }).length,
+    주방: zones.filter(z => (z.name || '').trim().startsWith('주방')).length,
+    거실: zones.filter(z => (z.name || '').trim().startsWith('거실')).length
+  };
+  
+  // 공정 순서 정의
+  const categoryOrder = [
+    '가설철거', '목공사', '전기공사', '설비공사', '화장실공사',
+    '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'
+  ];
+  
+  let html = `
+    <!-- 헤더 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="fw-bold m-0 text-white">
+        <i class="bi bi-calculator-fill"></i> 견적서 작성
+      </h3>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-info btn-sm" onclick="startNewEstimate()">
+          <i class="bi bi-plus-circle"></i> 새 견적
+        </button>
+        <button class="btn btn-outline-success btn-sm" onclick="saveEstimate()">
+          <i class="bi bi-save"></i> 저장
+        </button>
+        <button class="btn btn-outline-danger btn-sm" onclick="exportEstimatePDF()">
+          <i class="bi bi-file-pdf"></i> PDF로 내보내기
+        </button>
+        <button class="btn btn-outline-primary btn-sm" onclick="exportEstimateExcel()">
+          <i class="bi bi-file-earmark-excel"></i> 엑셀로 내보내기
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="showScreen('screen-list')">
+          <i class="bi bi-x-lg"></i> 닫기
+        </button>
+      </div>
+    </div>
+    
+    <!-- 현장 정보 -->
+    <div class="card bg-dark border-secondary text-white mb-3">
+      <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+          <div class="col-auto">
+            <strong>현장명:</strong> ${estimateSettings.siteName}
+          </div>
+          <div class="col-auto">
+            <strong>평수:</strong> ${estimateSettings.area}평
+          </div>
+          <div class="col-auto">
+            <strong>천장고:</strong> ${currentDrawing ? (currentDrawing.height || 2300) : 2300}mm
+          </div>
+          <div class="col">
+            <span class="badge bg-info me-1">욕실 ${zoneCounts.욕실}개</span>
+            <span class="badge bg-secondary me-1">현관 ${zoneCounts.현관}개</span>
+            <span class="badge bg-secondary me-1">발코니 ${zoneCounts.발코니}개</span>
+            <span class="badge bg-secondary me-1">방+안방 ${zoneCounts.방}개</span>
+            <span class="badge bg-secondary me-1">주방 ${zoneCounts.주방}개</span>
+            <span class="badge bg-secondary me-1">거실 ${zoneCounts.거실}개</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 단가표 기반 체크박스 UI -->
+    <div class="accordion mb-3" id="priceTableAccordion">
+  `;
+  
+  // 각 공정별로 아코디언 생성
+  categoryOrder.forEach((category, catIdx) => {
+    const priceItems = priceTables[category] || [];
+    if (priceItems.length === 0) return;
+    
+    const selectedItems = estimateItems.filter(item => item.category === category);
+    const selectedCount = selectedItems.length;
+    
+    html += `
+      <div class="accordion-item bg-dark border-secondary">
+        <h2 class="accordion-header">
+          <button class="accordion-button ${catIdx === 0 ? '' : 'collapsed'} bg-dark text-white" 
+                  type="button" data-bs-toggle="collapse" data-bs-target="#collapse${catIdx}">
+            <i class="bi bi-folder-fill me-2"></i>
+            <strong>${category}</strong>
+            <span class="badge bg-primary ms-2">${selectedCount}개 선택</span>
+          </button>
+        </h2>
+        <div id="collapse${catIdx}" class="accordion-collapse collapse ${catIdx === 0 ? 'show' : ''}" 
+             data-bs-parent="#priceTableAccordion">
+          <div class="accordion-body p-0">
+            <div class="table-responsive">
+              <table class="table table-sm table-dark table-hover mb-0">
+                <thead class="table-secondary">
+                  <tr>
+                    <th style="width: 50px;" class="text-center">✓</th>
+                    <th style="width: 200px;">품목</th>
+                    <th style="width: 150px;">규격</th>
+                    <th style="width: 60px;" class="text-center">단위</th>
+                    <th style="width: 100px;">수량</th>
+                    <th style="width: 100px;" class="text-end">재료비</th>
+                    <th style="width: 100px;" class="text-end">노무비</th>
+                    <th style="width: 120px;" class="text-end">금액</th>
+                  </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    // 품목 행 렌더링
+    priceItems.forEach((priceItem, itemIdx) => {
+      const isBathroomFixtureRemoval = category === '가설철거' && (priceItem.item === '화장실 집기철거' || priceItem.item === '화장실 집기물철거' || priceItem.item === '화장실 집기류철거');
+      let estimateItem = selectedItems.find(ei => 
+        ei.item === priceItem.item && ei.spec === priceItem.spec
+      );
+      // 화장실 집기철거: 이전 품목명(집기물/집기류)과 매칭
+      if (!estimateItem && isBathroomFixtureRemoval) {
+        estimateItem = selectedItems.find(ei => 
+          (ei.item === '화장실 집기철거' || ei.item === '화장실 집기물철거' || ei.item === '화장실 집기류철거') && (String(ei.spec || '').trim() === String(priceItem.spec || '').trim())
+        );
+      }
+      
+      // 수량 계산 (체크 여부와 관계없이 도면 기반으로 계산)
+      let calculatedQty = 1; // 기본값
+      if (currentDrawing) {
+        calculatedQty = calculateItemQuantity(category, priceItem, currentDrawing);
+      }
+      
+      // 체크된 항목이 있으면 저장된 수량 사용, 없으면 계산된 수량 사용
+      const isChecked = !!estimateItem;
+      const qty = estimateItem ? estimateItem.qty : calculatedQty;
+      const materialAmt = Math.round(qty * priceItem.materialPrice);
+      const laborAmt = Math.round(qty * priceItem.laborPrice);
+      const totalAmt = materialAmt + laborAmt;
+      
+      html += `
+        <tr>
+          <td class="text-center">
+            <input type="checkbox" class="form-check-input" ${isChecked ? 'checked' : ''}
+                   onchange="toggleEstimateItem('${category}', ${itemIdx}, this.checked)">
+          </td>
+          <td>${priceItem.item}</td>
+          <td class="small text-muted">${priceItem.spec || '-'}</td>
+          <td class="text-center">${priceItem.unit}</td>
+          <td>
+            <input type="number" class="form-control text-end" 
+                   style="min-height: 38px; font-size: 16px;"
+                   inputmode="decimal"
+                   value="${qty}" step="0.1" min="0"
+                   onchange="updateEstimateItemQty('${category}', ${itemIdx}, this.value)"
+                   id="qty_${catIdx}_${itemIdx}">
+          </td>
+          <td class="text-end small">${priceItem.materialPrice.toLocaleString()}</td>
+          <td class="text-end small">${priceItem.laborPrice.toLocaleString()}</td>
+          <td class="text-end fw-bold" id="amt_${catIdx}_${itemIdx}">
+            ${isChecked ? totalAmt.toLocaleString() : '-'}
+          </td>
+        </tr>
+      `;
+    });
+    
+    html += `
+                  <tr class="table-active">
+                    <td colspan="8" class="text-center py-2">
+                      <button class="btn btn-sm btn-outline-primary" onclick="showCustomItemForm('${category}', ${catIdx})">
+                        <i class="bi bi-pencil-square"></i> 직접 입력
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              
+              <!-- 커스텀 입력 폼 -->
+              <div id="customForm_${catIdx}" class="p-3 bg-secondary" style="display: none;">
+                <div class="row g-2">
+                  <div class="col-md-3">
+                    <input type="text" class="form-control form-control-sm" placeholder="품목명" id="customItem_${catIdx}">
+                  </div>
+                  <div class="col-md-2">
+                    <input type="text" class="form-control form-control-sm" placeholder="규격" id="customSpec_${catIdx}">
+                  </div>
+                  <div class="col-md-1">
+                    <input type="text" class="form-control form-control-sm" placeholder="단위" id="customUnit_${catIdx}">
+                  </div>
+                  <div class="col-md-1">
+                    <input type="number" class="form-control form-control-sm" placeholder="수량" id="customQty_${catIdx}" value="1" step="0.1">
+                  </div>
+                  <div class="col-md-2">
+                    <input type="number" class="form-control form-control-sm" placeholder="재료비" id="customMaterial_${catIdx}" value="0">
+                  </div>
+                  <div class="col-md-2">
+                    <input type="number" class="form-control form-control-sm" placeholder="노무비" id="customLabor_${catIdx}" value="0">
+                  </div>
+                  <div class="col-md-1">
+                    <button class="btn btn-sm btn-success w-100" onclick="addCustomItem('${category}', ${catIdx})">
+                      <i class="bi bi-check-lg"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="text-end mt-2">
+                  <button class="btn btn-sm btn-secondary" onclick="hideCustomItemForm(${catIdx})">
+                    <i class="bi bi-x-lg"></i> 취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  html += `
+    </div>
+    
+    <!-- 견적 요약 -->
+    <div class="card bg-dark border-secondary text-white">
+      <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-calculator"></i> 견적 요약</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-dark mb-0">
+          <tr>
+            <td class="text-end">소계</td>
+            <td class="text-end fw-bold">${totals.subtotal.toLocaleString()}원</td>
+          </tr>
+          <tr>
+            <td class="text-end">공과잡비 (${estimateSettings.overheadRate}%)</td>
+            <td class="text-end">${totals.overhead.toLocaleString()}원</td>
+          </tr>
+          <tr>
+            <td class="text-end">이윤 (${estimateSettings.profitRate}%)</td>
+            <td class="text-end">${totals.profit.toLocaleString()}원</td>
+          </tr>
+          <tr>
+            <td class="text-end fw-bold">조정액</td>
+            <td class="text-end fw-bold">${totals.adjusted.toLocaleString()}원</td>
+          </tr>
+          <tr class="table-active">
+            <td class="text-end fw-bold fs-5">총액 (VAT 별도)</td>
+            <td class="text-end fw-bold fs-5 text-warning">${totals.total.toLocaleString()}원</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  `;
+  
+  container.innerHTML = html;
+  
+  // 아코디언 상태 복원
+  setTimeout(() => {
+    restoreAccordionState();
+    
+    // 아코디언 클릭 이벤트 리스너 추가
+    document.querySelectorAll('.accordion-button').forEach(btn => {
+      btn.addEventListener('click', saveAccordionState);
+    });
+  }, 100);
+  
+  // 자동 저장
+  saveCurrentEstimate();
+}
+
+// =========================
+// ✅ 체크박스 토글
+// =========================
+function toggleEstimateItem(category, itemIdx, isChecked) {
+  // 현재 스크롤 위치 저장
+  const scrollPos = window.pageYOffset || document.documentElement.scrollTop;
+  
+  // 현재 아코디언 상태 저장
+  saveAccordionState();
+  
+  const priceItem = priceTables[category][itemIdx];
+  
+  if (isChecked) {
+    // 견적에 추가 - 기존 표시 수량 유지 (도면 기반 계산값 = 화면에 보이던 수량)
+    const qty = currentDrawing
+      ? calculateItemQuantity(category, priceItem, currentDrawing)
+      : 1;
+    addEstimateItem(category, priceItem.item, priceItem.spec, priceItem.unit, qty, priceItem.materialPrice, priceItem.laborPrice);
+  } else {
+    // 견적에서 제거
+    const index = estimateItems.findIndex(item => 
+      item.category === category && item.item === priceItem.item && item.spec === priceItem.spec
+    );
+    if (index >= 0) {
+      estimateItems.splice(index, 1);
+    }
+  }
+  
+  renderEstimateUI();
+  
+  // 스크롤 위치 복원
+  setTimeout(() => {
+    window.scrollTo(0, scrollPos);
+  }, 50);
+}
+
+// =========================
+// ✅ 수량 업데이트
+// =========================
+function updateEstimateItemQty(category, itemIdx, newQty) {
+  // 현재 스크롤 위치 저장
+  const scrollPos = window.pageYOffset || document.documentElement.scrollTop;
+  
+  // 현재 아코디언 상태 저장
+  saveAccordionState();
+  
+  const priceItem = priceTables[category][itemIdx];
+  const qty = Number(newQty) || 0;
+  
+  if (qty <= 0) {
+    alert('수량은 0보다 커야 합니다.');
+    renderEstimateUI();
+    setTimeout(() => window.scrollTo(0, scrollPos), 50);
+    return;
+  }
+  
+  // 해당 항목 찾아서 수량 업데이트
+  const item = estimateItems.find(item => 
+    item.category === category && item.item === priceItem.item && item.spec === priceItem.spec
+  );
+  
+  if (item) {
+    item.qty = Math.round(qty * 100) / 100;
+    item.materialAmount = Math.round(qty * item.materialPrice);
+    item.laborAmount = Math.round(qty * item.laborPrice);
+    item.totalAmount = item.materialAmount + item.laborAmount;
+    renderEstimateUI();
+    
+    // 스크롤 위치 복원
+    setTimeout(() => {
+      window.scrollTo(0, scrollPos);
+    }, 50);
+  }
+}
+
+// =========================
+// ✅ 금액 계산
+// =========================
+function calculateTotals() {
+  const subtotal = estimateItems.reduce((sum, item) => sum + item.totalAmount, 0);
+  const overhead = Math.round(subtotal * estimateSettings.overheadRate / 100);
+  const profit = Math.round(subtotal * estimateSettings.profitRate / 100);
+  const adjusted = subtotal + overhead + profit;
+  const vat = Math.round(adjusted * estimateSettings.vatRate / 100);
+  const total = adjusted; // VAT 별도, 견적 총액에는 미포함
+  
+  return { subtotal, overhead, profit, adjusted, vat, total };
+}
+
+// =========================
+// ✅ 품목 드롭다운 업데이트
+// =========================
+function updateItemDropdown() {
+  const category = document.getElementById('addCategory').value;
+  const itemSelect = document.getElementById('addItem');
+  
+  itemSelect.innerHTML = '<option value="">선택...</option>';
+  
+  if (!category || !priceTables[category]) return;
+  
+  priceTables[category].forEach((item, idx) => {
+    itemSelect.innerHTML += `<option value="${idx}">${item.item}</option>`;
+  });
+}
+
+// =========================
+// ✅ 단가표에서 항목 선택
+// =========================
+function selectItemFromTable() {
+  const category = document.getElementById('addCategory').value;
+  const itemIdx = document.getElementById('addItem').value;
+  
+  if (!category || itemIdx === '' || !priceTables[category]) return;
+  
+  const item = priceTables[category][itemIdx];
+  
+  document.getElementById('addSpec').value = item.spec;
+  document.getElementById('addUnit').value = item.unit;
+  document.getElementById('addMaterialPrice').value = item.materialPrice;
+  document.getElementById('addLaborPrice').value = item.laborPrice;
+  
+  updateAddAmounts();
+}
+
+// =========================
+// ✅ 추가 항목 금액 업데이트
+// =========================
+function updateAddAmounts() {
+  const qty = Number(document.getElementById('addQty').value) || 0;
+  const materialPrice = Number(document.getElementById('addMaterialPrice').value) || 0;
+  const laborPrice = Number(document.getElementById('addLaborPrice').value) || 0;
+  
+  document.getElementById('addMaterialAmount').value = Math.round(qty * materialPrice).toLocaleString();
+  document.getElementById('addLaborAmount').value = Math.round(qty * laborPrice).toLocaleString();
+}
+
+// 수량/단가 변경 시 금액 자동 업데이트
+document.addEventListener('DOMContentLoaded', () => {
+  ['addQty', 'addMaterialPrice', 'addLaborPrice'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateAddAmounts);
+  });
+});
+
+// =========================
+// ✅ 항목 수동 추가
+// =========================
+function addItemManually() {
+  const category = document.getElementById('addCategory').value;
+  const itemIdx = document.getElementById('addItem').value;
+  const spec = document.getElementById('addSpec').value;
+  const unit = document.getElementById('addUnit').value;
+  const qty = Number(document.getElementById('addQty').value) || 0;
+  const materialPrice = Number(document.getElementById('addMaterialPrice').value) || 0;
+  const laborPrice = Number(document.getElementById('addLaborPrice').value) || 0;
+  
+  if (!category || itemIdx === '') {
+    alert('공정과 품목을 선택하세요.');
+    return;
+  }
+  
+  if (qty <= 0) {
+    alert('수량을 입력하세요.');
+    return;
+  }
+  
+  const item = priceTables[category][itemIdx].item;
+  
+  addEstimateItem(category, item, spec, unit, qty, materialPrice, laborPrice);
+  renderEstimateUI();
+  
+  // 입력 초기화
+  document.getElementById('addQty').value = 1;
+}
+
+// =========================
+// ✅ 항목 삭제
+// =========================
+function removeItem(index) {
+  if (!confirm('이 항목을 삭제하시겠습니까?')) return;
+  
+  estimateItems.splice(index, 1);
+  renderEstimateUI();
+}
+
+// =========================
+// ✅ 커스텀 항목 입력 폼 표시
+// =========================
+function showCustomItemForm(category, catIdx) {
+  const form = document.getElementById(`customForm_${catIdx}`);
+  if (form) {
+    form.style.display = 'block';
+    document.getElementById(`customItem_${catIdx}`).focus();
+  }
+}
+
+// =========================
+// ✅ 커스텀 항목 입력 폼 숨기기
+// =========================
+function hideCustomItemForm(catIdx) {
+  const form = document.getElementById(`customForm_${catIdx}`);
+  if (form) {
+    form.style.display = 'none';
+    // 입력 필드 초기화
+    document.getElementById(`customItem_${catIdx}`).value = '';
+    document.getElementById(`customSpec_${catIdx}`).value = '';
+    document.getElementById(`customUnit_${catIdx}`).value = '';
+    document.getElementById(`customQty_${catIdx}`).value = '1';
+    document.getElementById(`customMaterial_${catIdx}`).value = '0';
+    document.getElementById(`customLabor_${catIdx}`).value = '0';
+  }
+}
+
+// =========================
+// ✅ 커스텀 항목 추가
+// =========================
+function addCustomItem(category, catIdx) {
+  const item = document.getElementById(`customItem_${catIdx}`).value.trim();
+  const spec = document.getElementById(`customSpec_${catIdx}`).value.trim();
+  const unit = document.getElementById(`customUnit_${catIdx}`).value.trim();
+  const qty = Number(document.getElementById(`customQty_${catIdx}`).value) || 0;
+  const materialPrice = Number(document.getElementById(`customMaterial_${catIdx}`).value) || 0;
+  const laborPrice = Number(document.getElementById(`customLabor_${catIdx}`).value) || 0;
+  
+  if (!item) {
+    alert('품목명을 입력하세요.');
+    return;
+  }
+  
+  if (!unit) {
+    alert('단위를 입력하세요.');
+    return;
+  }
+  
+  if (qty <= 0) {
+    alert('수량을 입력하세요.');
+    return;
+  }
+  
+  // 견적에 추가
+  addEstimateItem(category, item, spec, unit, qty, materialPrice, laborPrice);
+  
+  // 폼 숨기고 초기화
+  hideCustomItemForm(catIdx);
+  
+  // UI 새로고침
+  renderEstimateUI();
+}
+
+// =========================
+// ✅ 새 견적 작성
+// =========================
+function startNewEstimate() {
+  if (!confirm('현재 작업 중인 견적을 초기화하고 새로 시작하시겠습니까?')) return;
+  
+  // 임시 저장 데이터 삭제
+  localStorage.removeItem('currentEstimate');
+  
+  // 변수 초기화
+  currentDrawing = null;
+  estimateItems = [];
+  priceTables = {};
+  
+  // 초기 화면으로
+  initEstimateScreen();
+}
+
+// =========================
+// ✅ 견적서 저장
+// =========================
+function saveEstimate() {
+  const totals = calculateTotals();
+  
+  const data = {
+    siteName: estimateSettings.siteName,
+    area: estimateSettings.area,
+    items: estimateItems,
+    subtotal: totals.subtotal,
+    overhead: totals.overhead,
+    profit: totals.profit,
+    adjusted: totals.adjusted,
+    vat: totals.vat,
+    total: totals.total
+  };
+  
+  if (window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(res => {
+        alert(res);
+        // 저장 성공 시 임시 저장 데이터 유지 (계속 작업 가능)
+      })
+      .withFailureHandler(err => {
+        alert('❌ 저장 실패: ' + (err.message || err));
+      })
+      .saveEstimate(JSON.stringify(data));
+  } else {
+    alert('테스트 모드: 저장 기능은 실제 환경에서만 작동합니다.');
+  }
+}
+
+// =========================
+// ✅ PDF로 내보내기 (체크된 품목만, 공정별 대제목 + 품목 하위)
+// =========================
+function exportEstimatePDF() {
+  const totals = calculateTotals();
+  const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+  const byCategory = {};
+  estimateItems.forEach(function(item) {
+    if (!byCategory[item.category]) byCategory[item.category] = [];
+    byCategory[item.category].push(item);
+  });
+  
+  let no = 0;
+  let rows = '';
+  categoryOrder.forEach(function(cat) {
+    const items = byCategory[cat];
+    if (!items || items.length === 0) return;
+    rows += '<tr class="section-header"><td colspan="10"><strong>■ ' + escapeHtml(cat) + '</strong></td></tr>';
+    let catSum = 0;
+    items.forEach(function(item) {
+      no++;
+      catSum += Number(item.totalAmount) || 0;
+      rows += '<tr>' +
+        '<td>' + no + '</td>' +
+        '<td>' + escapeHtml(item.item) + '</td>' +
+        '<td>' + escapeHtml(item.spec || '-') + '</td>' +
+        '<td>' + item.unit + '</td>' +
+        '<td class="text-end">' + Number(item.qty) + '</td>' +
+        '<td class="text-end">' + Number(item.materialPrice).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.materialAmount).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.laborPrice).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.laborAmount).toLocaleString() + '</td>' +
+        '<td class="text-end">' + Number(item.totalAmount).toLocaleString() + '</td>' +
+        '</tr>';
+    });
+    rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
+  });
+  
+  const html = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>견적서 - ${escapeHtml(estimateSettings.siteName || '현장명')}</title>
+  <style>
+    body { font-family: Malgun Gothic, sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
+    .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; }
+    h1 { font-size: 1.4em; margin: 0 0 6px 0; }
+    .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; font-size: 10pt; }
+    th, td { border: 1px solid #333; padding: 4px 6px; text-align: left; overflow: hidden; }
+    th { background: #eee; font-weight: bold; }
+    .text-end { text-align: right; }
+    tr.section-header td { background: #e0e0e0; font-size: 1em; font-weight: bold; padding: 5px 6px; }
+    tr.category-subtotal td { background: #f5f5f5; font-weight: bold; }
+    .summary { margin-top: 8px; }
+    .summary td { border: none; padding: 2px 6px; }
+    .total-row { font-weight: bold; font-size: 1.05em; }
+    .preview-actions { margin-top: 20px; padding: 12px; border-top: 1px solid #ccc; display: flex; gap: 12px; }
+    .btn-print, .btn-close { padding: 10px 20px; font-size: 14px; cursor: pointer; border-radius: 6px; border: 1px solid #333; }
+    .btn-print { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+    .btn-print:hover { background: #0b5ed7; }
+    .btn-close { background: #fff; color: #333; }
+    .btn-close:hover { background: #f0f0f0; }
+    @media print {
+      @page { size: 297mm 210mm; margin: 12mm; }
+      body { width: 100%; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .sheet { width: 273mm; min-height: auto; padding: 0; margin: 0; }
+      .preview-actions, .print-hint { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="sheet">
+  <h1>견적서 <span style="font-size:0.6em;color:#666;">(미리보기)</span></h1>
+  <div class="info">
+    <strong>현장명:</strong> ${escapeHtml(estimateSettings.siteName || '-')} &nbsp;|&nbsp;
+    <strong>평수:</strong> ${estimateSettings.area || '-'}평 &nbsp;|&nbsp;
+    <strong>천장고:</strong> ${currentDrawing ? (currentDrawing.height || 2300) : 2300}mm
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>No</th><th>품목</th><th>규격</th><th>단위</th><th>수량</th>
+        <th class="text-end">재료비단가</th><th class="text-end">재료비금액</th>
+        <th class="text-end">노무비단가</th><th class="text-end">노무비금액</th><th class="text-end">금액</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <table class="summary">
+    <tr><td colspan="9" class="text-end">소계</td><td class="text-end">${totals.subtotal.toLocaleString()}원</td></tr>
+    <tr><td colspan="9" class="text-end">공과잡비(5%)</td><td class="text-end">${totals.overhead.toLocaleString()}원</td></tr>
+    <tr><td colspan="9" class="text-end">이윤(10%)</td><td class="text-end">${totals.profit.toLocaleString()}원</td></tr>
+    <tr><td colspan="9" class="text-end">조정액</td><td class="text-end">${totals.adjusted.toLocaleString()}원</td></tr>
+    <tr class="total-row"><td colspan="9" class="text-end">총액 (VAT 별도)</td><td class="text-end">${totals.total.toLocaleString()}원</td></tr>
+  </table>
+  <p class="print-hint" style="margin-top:16px;padding:10px;background:#fff3cd;border-radius:6px;font-size:14px;">
+    <strong>가로 인쇄:</strong> 아래 버튼 클릭 후 인쇄 창에서 <strong>방향 → 가로</strong>를 선택한 뒤 PDF로 저장하세요.
+  </p>
+  <div class="preview-actions">
+    <button type="button" onclick="window.print();" class="btn-print">인쇄하여 PDF로 저장</button>
+    <button type="button" onclick="window.close();" class="btn-close">닫기</button>
+  </div>
+</div>
+</body>
+</html>`;
+  
+  const w = window.open('', '_blank', 'width=1020,height=720,scrollbars=yes,resizable=yes');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// =========================
+// ✅ 엑셀로 내보내기 (CSV, 공정별 대제목 + 품목 하위)
+// =========================
+function exportEstimateExcel() {
+  const totals = calculateTotals();
+  const BOM = '\uFEFF';
+  const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+  const byCategory = {};
+  estimateItems.forEach(function(item) {
+    if (!byCategory[item.category]) byCategory[item.category] = [];
+    byCategory[item.category].push(item);
+  });
+  
+  let csv = BOM + 'No,품목,규격,단위,수량,재료비단가,재료비금액,노무비단가,노무비금액,금액\r\n';
+  let no = 0;
+  categoryOrder.forEach(function(cat) {
+    const items = byCategory[cat];
+    if (!items || items.length === 0) return;
+    csv += ',"■ ' + cat + '",,,,,,,,,\r\n';
+    let catSum = 0;
+    items.forEach(function(item) {
+      no++;
+      catSum += Number(item.totalAmount) || 0;
+      csv += [
+        no,
+        '"' + (item.item || '').replace(/"/g, '""') + '"',
+        '"' + (item.spec || '').replace(/"/g, '""') + '"',
+        item.unit,
+        item.qty,
+        item.materialPrice,
+        item.materialAmount,
+        item.laborPrice,
+        item.laborAmount,
+        item.totalAmount
+      ].join(',') + '\r\n';
+    });
+    csv += ',"' + cat + ' 소계",,,,,,,,,' + catSum + '\r\n';
+  });
+  
+  csv += ',,,,,,,소계,' + totals.subtotal + '\r\n';
+  csv += ',,,,,,,공과잡비(5%),' + totals.overhead + '\r\n';
+  csv += ',,,,,,,이윤(10%),' + totals.profit + '\r\n';
+  csv += ',,,,,,,조정액,' + totals.adjusted + '\r\n';
+  csv += ',,,,,,,총액 (VAT 별도),' + totals.total + '\r\n';
+  
+  const name = (estimateSettings.siteName || '견적서').replace(/[/\\?*:\[\]]/g, '_');
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = name + '_' + date + '.csv';
+  
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+</script>

@@ -1,0 +1,669 @@
+<script>
+let currentHistoryItem = null;
+
+// ====== 모달 캔버스(도면보기) 줌/이동 상태 ======
+let modalCanvasState = {
+  scale: 1, pX: 0, pY: 0,
+  isDragging: false, startX: 0, startY: 0
+};
+
+// ====== 전체화면 이미지뷰어 상태 ======
+let viewerState = {
+  scale: 1, pX: 0, pY: 0,
+  isDragging: false, startX: 0, startY: 0
+};
+
+// 중복 이벤트 방지용
+let modalCanvasInteractionInited = false;
+let viewerInteractionInited = false;
+
+// =========================
+// ✅ 리스트 로드
+// =========================
+function loadList() {
+  const c = document.getElementById('list-container');
+  if (!c) {
+    alert("❌ list-container가 없습니다. (screen-list 안에 <div id='list-container'> 필요)");
+    return;
+  }
+
+  c.innerHTML = "<div class='text-white text-center mt-5'>로딩중...</div>";
+
+  if (window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(renderList)
+      .withFailureHandler(err => {
+        const msg = (err && err.message) ? err.message : JSON.stringify(err);
+        c.innerHTML = `<div class="text-danger text-center mt-5">불러오기 실패<br><small>${msg}</small></div>`;
+        alert("❌ 도면 불러오기 실패: " + msg);
+      })
+      .getData();
+  } else {
+    c.innerHTML = "<div class='text-white text-center mt-5'>테스트 모드: 서버 연결 없음</div>";
+    if (!document.getElementById('historyModal')) createHistoryDOM();
+  }
+}
+
+// =========================
+// ✅ 리스트 렌더
+// =========================
+function renderList(json) {
+  let list = [];
+  try {
+    list = JSON.parse(json || "[]");
+  } catch (e) {
+    alert("❌ renderList JSON 파싱 실패: " + e.message + "\n원문 일부: " + String(json).slice(0, 200));
+    list = [];
+  }
+
+  const div = document.getElementById('list-container');
+  if (!div) return;
+
+  div.innerHTML = "";
+
+  if (!list || list.length === 0) {
+    div.innerHTML = "<p class='text-white text-center mt-5'>보관함이 비었습니다.</p>";
+    if (!document.getElementById('historyModal')) createHistoryDOM();
+    return;
+  }
+
+  const row = document.createElement('div');
+  row.className = "row g-3";
+
+  list.forEach((item, index) => {
+    const col = document.createElement('div');
+    col.className = "col-6 col-md-4 col-lg-3";
+
+    const card = document.createElement('div');
+    card.className = "card bg-dark text-white border-secondary h-100 shadow-sm";
+    card.style.cursor = "pointer";
+    card.onclick = () => openModal(item);
+
+    const date = item.date ? String(item.date).substring(0, 10) : '-';
+
+    card.innerHTML = `
+      <div class="card-body p-2 text-center">
+        <canvas id="thumb-${index}" style="width:100%; height:150px; background:#222; border-radius:4px; margin-bottom:10px; border:1px solid #444;"></canvas>
+        <h6 class="card-title text-truncate fw-bold mb-1">${item.siteName || 'NoName'}</h6>
+        <p class="card-text text-secondary small mb-0">${date}</p>
+        <button class="btn btn-danger btn-sm mt-2" onclick="event.stopPropagation(); deleteItem('${(item.siteName || 'NoName').replace(/'/g, "\\'")}')">
+          <i class="bi bi-trash"></i> 삭제
+        </button>
+      </div>
+    `;
+
+    col.appendChild(card);
+    row.appendChild(col);
+
+    setTimeout(() => {
+      try { drawPreview(item, `thumb-${index}`, true); }
+      catch (e) { console.error(e); }
+    }, 50);
+  });
+
+  div.appendChild(row);
+
+  if (!document.getElementById('historyModal')) createHistoryDOM();
+}
+
+// =========================
+// ✅ 모달 열기
+// =========================
+function openModal(item) {
+  currentHistoryItem = item;
+
+  const t = document.getElementById('modalTitle');
+  const d = document.getElementById('modalDate');
+  if (t) t.innerText = item.siteName || '상세';
+  if (d) d.innerText = `날짜: ${item.date || '-'} | 높이: ${item.height || 2300}mm`;
+
+  // 모달 열 때마다 상태 리셋
+  modalCanvasState = { scale: 1, pX: 0, pY: 0, isDragging: false, startX: 0, startY: 0 };
+
+  new bootstrap.Modal(document.getElementById('historyModal')).show();
+
+  setTimeout(() => {
+    drawPreview(item, 'modalCanvas', false);
+    // 모달 캔버스 인터랙션 초기화(1회만)
+    initModalCanvasInteraction();
+  }, 200);
+}
+
+// =========================
+// ✅ drawPreview
+// - 썸네일: fit 렌더링
+// - 모달: fit + modalCanvasState 줌/이동 반영
+// =========================
+function drawPreview(data, id, isThumb) {
+  const cvs = document.getElementById(id);
+  if (!cvs) return;
+
+  const ctx = cvs.getContext('2d');
+  const rect = cvs.getBoundingClientRect();
+
+  // ✅ DPR 자동(기기별 선명도)
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  cvs.width = Math.max(1, Math.floor(rect.width * dpr));
+  cvs.height = Math.max(1, Math.floor(rect.height * dpr));
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(0, 0, cvs.width, cvs.height);
+
+  // 모든 점 수집
+  let pts = [];
+  if (data.zones) data.zones.forEach(z => pts.push(...(z.pts || [])));
+  if (data.freeWalls) data.freeWalls.forEach(w => pts.push(...(w || [])));
+  if (data.furnitureLines) data.furnitureLines.forEach(f => { if (f?.p1) pts.push(f.p1); if (f?.p2) pts.push(f.p2); });
+  if (data.doors) data.doors.forEach(d => { if (d?.x != null && d?.y != null) pts.push({ x: d.x, y: d.y }); });
+
+  if (pts.length === 0) return;
+
+  // 바운딩 박스
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  pts.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  });
+
+  if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return;
+
+  const pad = isThumb ? 140 * dpr : 260 * dpr; // DPR 반영 패딩
+  const w = Math.max(1, (maxX - minX));
+  const h = Math.max(1, (maxY - minY));
+
+  let fitScale = Math.min((cvs.width - pad) / w, (cvs.height - pad) / h);
+  if (!isFinite(fitScale) || fitScale <= 0) fitScale = 1;
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  // 모달이면 사용자 줌/이동 적용
+  const isModal = (!isThumb && id === 'modalCanvas');
+  const userScale = isModal ? modalCanvasState.scale : 1;
+  const panX = isModal ? modalCanvasState.pX * dpr : 0; // px → DPR
+  const panY = isModal ? modalCanvasState.pY * dpr : 0;
+
+  const scale = fitScale * userScale;
+
+  ctx.save();
+  // 화면 가운데 + 패닝
+  ctx.translate(cvs.width / 2 + panX, cvs.height / 2 + panY);
+  ctx.scale(scale, scale);
+  ctx.translate(-cx, -cy);
+
+  const lw = 2 / scale;
+  const fs = isThumb ? 30 : 18;
+
+  const label = (t, x, y, c, bg) => {
+    if (isThumb && !bg) return;
+    ctx.font = `bold ${fs / scale}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (bg) {
+      const tw = ctx.measureText(t).width + 10 / scale;
+      const th = (fs + 6) / scale;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(x - tw / 2, y - th / 2, tw, th);
+    }
+    ctx.fillStyle = c;
+    ctx.fillText(t, x, y);
+  };
+
+  const dim = (p1, p2, c) => {
+    const mm = Math.round(Math.hypot(p1.x - p2.x, p1.y - p2.y));
+    label(String(mm), (p1.x + p2.x) / 2, (p1.y + p2.y) / 2, c, true);
+  };
+
+  // ===== Zones =====
+  if (data.zones) data.zones.forEach(z => {
+    const zpts = (z.pts || []);
+    if (zpts.length < 3) return;
+
+    ctx.beginPath();
+    zpts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = lw;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fill();
+
+    let zx = 0, zy = 0;
+    zpts.forEach(p => { zx += p.x; zy += p.y; });
+    zx /= zpts.length;
+    zy /= zpts.length;
+
+    label(z.name || '구역', zx, zy - 15 / scale, '#fff', true);
+    label((z.area || "0") + "m²", zx, zy + 15 / scale, '#0f0', true);
+
+    for (let i = 0; i < zpts.length; i++) {
+      dim(zpts[i], zpts[(i + 1) % zpts.length], '#ff0');
+    }
+  });
+
+  // ===== Free walls =====
+  if (data.freeWalls) {
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = lw;
+    data.freeWalls.forEach(wall => {
+      const wPts = wall || [];
+      if (wPts.length < 2) return;
+      ctx.beginPath();
+      wPts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+      for (let i = 0; i < wPts.length - 1; i++) dim(wPts[i], wPts[i + 1], '#ff0');
+    });
+  }
+
+  // ===== Furniture =====
+  if (data.furnitureLines) data.furnitureLines.forEach(f => {
+    if (!f?.p1 || !f?.p2) return;
+    const col = f.type === 'closet' ? '#0dcaf0' : (f.type === 'sink' ? '#198754' : '#ffc107');
+    ctx.strokeStyle = col;
+    ctx.lineWidth = lw * 2;
+    ctx.beginPath();
+    ctx.moveTo(f.p1.x, f.p1.y);
+    ctx.lineTo(f.p2.x, f.p2.y);
+    ctx.stroke();
+
+    const mm = Math.round(Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y));
+    const tx = (f.p1.x + f.p2.x) / 2;
+    const ty = (f.p1.y + f.p2.y) / 2;
+    label(`${f.name || '가구'} ${mm}`, tx, ty, '#fff', true);
+  });
+
+  // ===== Doors (✅ 문 폭 width 반영) =====
+  if (data.doors) data.doors.forEach(d => {
+    if (d?.x == null || d?.y == null) return;
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate((d.rotation || 0) * Math.PI / 2);
+    if (d.flipped) ctx.scale(1, -1);
+
+    const s = Number(d.width) || 900; // ✅ 저장된 문 폭 없으면 900
+
+    ctx.strokeStyle = '#dc3545';
+    ctx.lineWidth = lw;
+    ctx.strokeRect(-10 / scale, -s / 2, 20 / scale, s);
+    ctx.beginPath(); ctx.arc(0, -s / 2, s, 0, Math.PI / 2, false); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -s / 2); ctx.lineTo(0, s / 2); ctx.stroke();
+    ctx.fillStyle = '#dc3545';
+    ctx.beginPath(); ctx.arc(0, -s / 2, 5 / scale, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+  });
+
+  ctx.restore();
+}
+
+// =========================
+// ✅ 도면보기(모달) 줌/이동
+// =========================
+function modalZoom(factor) {
+  modalCanvasState.scale = Math.max(0.2, Math.min(12, modalCanvasState.scale * factor));
+  if (currentHistoryItem) drawPreview(currentHistoryItem, 'modalCanvas', false);
+}
+function modalPan(dx, dy) {
+  // dx/dy = px (UI 기준)
+  modalCanvasState.pX += dx;
+  modalCanvasState.pY += dy;
+  if (currentHistoryItem) drawPreview(currentHistoryItem, 'modalCanvas', false);
+}
+function modalReset() {
+  modalCanvasState.scale = 1;
+  modalCanvasState.pX = 0;
+  modalCanvasState.pY = 0;
+  if (currentHistoryItem) drawPreview(currentHistoryItem, 'modalCanvas', false);
+}
+
+function modalZoomFit() {
+  if (!currentHistoryItem) return;
+  
+  const cvs = document.getElementById('modalCanvas');
+  if (!cvs) return;
+  
+  let allPoints = [];
+  const data = currentHistoryItem;
+  
+  if (data.zones) data.zones.forEach(z => z.pts.forEach(p => allPoints.push(p)));
+  if (data.freeWalls) data.freeWalls.forEach(w => w.forEach(p => allPoints.push(p)));
+  if (data.furnitureLines) data.furnitureLines.forEach(f => {
+    allPoints.push(f.p1);
+    allPoints.push(f.p2);
+  });
+  if (data.doors) data.doors.forEach(d => allPoints.push({x: d.x, y: d.y}));
+  
+  if (allPoints.length === 0) {
+    modalReset();
+    return;
+  }
+  
+  let minX = allPoints[0].x, maxX = allPoints[0].x;
+  let minY = allPoints[0].y, maxY = allPoints[0].y;
+  
+  allPoints.forEach(p => {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  });
+  
+  let width = (maxX - minX) * 1.2;
+  let height = (maxY - minY) * 1.2;
+  
+  let scaleX = cvs.width / width;
+  let scaleY = cvs.height / height;
+  let newScale = Math.min(scaleX, scaleY);
+  
+  newScale = Math.max(0.2, Math.min(12, newScale));
+  
+  modalCanvasState.scale = newScale;
+  modalCanvasState.pX = 0;
+  modalCanvasState.pY = 0;
+  
+  drawPreview(currentHistoryItem, 'modalCanvas', false);
+}
+
+function initModalCanvasInteraction() {
+  if (modalCanvasInteractionInited) return;
+
+  const cvs = document.getElementById('modalCanvas');
+  if (!cvs) return;
+
+  // ✅ NEW: 모바일/터치에서 드래그가 스크롤로 먹는 것 방지
+  cvs.style.touchAction = 'none';
+
+  // 휠 줌
+  cvs.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    modalZoom(e.deltaY > 0 ? 0.9 : 1.1);
+  }, { passive: false });
+
+  // 드래그 이동
+  cvs.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // ✅ NEW
+    modalCanvasState.isDragging = true;
+    modalCanvasState.startX = e.clientX - modalCanvasState.pX;
+    modalCanvasState.startY = e.clientY - modalCanvasState.pY;
+    try { cvs.setPointerCapture(e.pointerId); } catch(_) {}
+  });
+
+  cvs.addEventListener('pointermove', (e) => {
+    if (!modalCanvasState.isDragging) return;
+    e.preventDefault();
+    modalCanvasState.pX = e.clientX - modalCanvasState.startX;
+    modalCanvasState.pY = e.clientY - modalCanvasState.startY;
+    if (currentHistoryItem) drawPreview(currentHistoryItem, 'modalCanvas', false);
+  }, { passive: false });
+
+  const endDrag = (e) => {
+    modalCanvasState.isDragging = false;
+    try { cvs.releasePointerCapture(e.pointerId); } catch(_) {}
+  };
+  cvs.addEventListener('pointerup', endDrag);
+  cvs.addEventListener('pointercancel', endDrag);
+
+  modalCanvasInteractionInited = true;
+}
+
+// =========================
+// ✅ 전체화면 이미지뷰어
+// =========================
+function openViewer() {
+  const mc = document.getElementById('modalCanvas');
+  if (!mc) return;
+
+  document.getElementById('viewerImage').src = mc.toDataURL();
+  viewerState = { scale: 1, pX: 0, pY: 0, isDragging: false, startX: 0, startY: 0 };
+  updateViewer();
+
+  document.getElementById('fullScreenViewer').style.display = 'flex';
+  initViewer(); // 안전하게 1회 init
+}
+function closeViewer() { document.getElementById('fullScreenViewer').style.display = 'none'; }
+
+function viewerZoom(factor) {
+  viewerState.scale = Math.max(0.1, Math.min(8, viewerState.scale * factor));
+  updateViewer();
+}
+function viewerPan(dx, dy) {
+  viewerState.pX += dx;
+  viewerState.pY += dy;
+  updateViewer();
+}
+function viewerReset() {
+  viewerState.scale = 1;
+  viewerState.pX = 0;
+  viewerState.pY = 0;
+  updateViewer();
+}
+
+function viewerZoomFit() {
+  viewerState.scale = 1;
+  viewerState.pX = 0;
+  viewerState.pY = 0;
+  updateViewer();
+}
+
+function initViewer() {
+  if (viewerInteractionInited) return;
+
+  const v = document.getElementById('fullScreenViewer');
+  if (!v) return;
+
+  // ✅ NEW: 모바일 터치 제스처가 브라우저 기본 동작으로 새는 것 방지
+  v.style.touchAction = 'none';
+
+  v.addEventListener('wheel', e => {
+    e.preventDefault();
+    viewerState.scale += e.deltaY * -0.001;
+    viewerState.scale = Math.max(0.1, Math.min(8, viewerState.scale));
+    updateViewer();
+  }, { passive: false });
+
+  v.addEventListener('pointerdown', e => {
+    e.preventDefault(); // ✅ NEW
+    viewerState.isDragging = true;
+    viewerState.startX = e.clientX - viewerState.pX;
+    viewerState.startY = e.clientY - viewerState.pY;
+    try { v.setPointerCapture(e.pointerId); } catch(_) {}
+  });
+
+  v.addEventListener('pointermove', e => {
+    if (!viewerState.isDragging) return;
+    e.preventDefault();
+    viewerState.pX = e.clientX - viewerState.startX;
+    viewerState.pY = e.clientY - viewerState.startY;
+    updateViewer();
+  }, { passive: false });
+
+  const endDrag = (e) => {
+    viewerState.isDragging = false;
+    try { v.releasePointerCapture(e.pointerId); } catch(_) {}
+  };
+  v.addEventListener('pointerup', endDrag);
+  v.addEventListener('pointercancel', endDrag);
+
+  viewerInteractionInited = true;
+}
+
+function updateViewer() {
+  const img = document.getElementById('viewerImage');
+  if (!img) return;
+  img.style.transform = `translate(${viewerState.pX}px, ${viewerState.pY}px) scale(${viewerState.scale})`;
+}
+
+// =========================
+// ✅ DXF 다운로드 (모바일 호환)
+// =========================
+function downloadDXF() {
+  if (!currentHistoryItem) return;
+
+  const d = currentHistoryItem;
+  let dxf = "0\nSECTION\n2\nENTITIES\n";
+
+  if (d.zones) d.zones.forEach(z => {
+    for (let i = 0; i < z.pts.length; i++) {
+      let p1 = z.pts[i], p2 = z.pts[(i + 1) % z.pts.length];
+      dxf += `0\nLINE\n8\nWALL\n10\n${p1.x}\n20\n${p1.y}\n11\n${p2.x}\n21\n${p2.y}\n`;
+    }
+  });
+
+  if (d.freeWalls) d.freeWalls.forEach(w => {
+    for (let i = 0; i < w.length - 1; i++) {
+      let p1 = w[i], p2 = w[i + 1];
+      dxf += `0\nLINE\n8\nWALL\n10\n${p1.x}\n20\n${p1.y}\n11\n${p2.x}\n21\n${p2.y}\n`;
+    }
+  });
+
+  if (d.furnitureLines) d.furnitureLines.forEach(f => {
+    dxf += `0\nLINE\n8\n${String(f.type || 'FURN').toUpperCase()}\n10\n${f.p1.x}\n20\n${f.p1.y}\n11\n${f.p2.x}\n21\n${f.p2.y}\n`;
+  });
+
+  dxf += "0\nENDSEC\n0\nEOF";
+
+  // ✅ 모바일 호환: Blob을 text/plain으로 생성 후 다운로드
+  const blob = new Blob([dxf], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const fileName = (d.siteName || 'drawing') + ".dxf";
+
+  // ✅ a 태그를 DOM에 추가 (모바일 브라우저 호환성)
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.style.display = 'none';
+  
+  document.body.appendChild(a);
+  
+  // ✅ setTimeout으로 클릭 지연 (iOS Safari 호환)
+  setTimeout(() => {
+    try {
+      a.click();
+      
+      // ✅ 클릭 후 정리
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+      
+      // ✅ 모바일에서 피드백
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        setTimeout(() => {
+          alert(`✅ DXF 파일 다운로드 시작!\n\n파일명: ${fileName}\n\n※ 다운로드 폴더를 확인하세요.`);
+        }, 500);
+      }
+    } catch (e) {
+      alert('❌ 다운로드 실패: ' + e.message);
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }, 100);
+}
+
+// =========================
+// ✅ 모달 DOM 생성
+// - 이동 버튼 방향: 아이콘과 실제 이동 일치하도록 수정 완료
+// =========================
+function createHistoryDOM() {
+  const m = `
+    <div class="modal fade" id="historyModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark text-white border-secondary">
+          <div class="modal-header border-secondary">
+            <h5 class="modal-title" id="modalTitle"></h5>
+            <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+
+          <div class="modal-body text-center">
+            <div id="modalCanvasWrap" style="position:relative; width:100%; height:450px; background:#111; overflow:hidden; border:1px solid #444;">
+              <canvas id="modalCanvas" style="width:100%;height:100%"></canvas>
+
+              <!-- ✅ 도면보기(모달) 줌/이동 버튼 (방향 정상) -->
+              <div id="modalNav" style="position:absolute; left:12px; bottom:12px; z-index:20; display:flex; flex-direction:column; gap:8px; padding:10px; border-radius:14px; background:rgba(0,0,0,.45); backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.12);">
+                <div style="display:flex; justify-content:center; gap:8px;">
+                  <button type="button" class="btn btn-dark btn-sm" onclick="modalZoom(1.15)" title="확대"><i class="bi bi-zoom-in"></i></button>
+                </div>
+                <div style="display:flex; justify-content:center; gap:8px;">
+                  <button type="button" class="btn btn-dark btn-sm" onclick="modalZoom(1/1.15)" title="축소"><i class="bi bi-zoom-out"></i></button>
+                </div>
+                <div style="display:flex; justify-content:center; gap:8px;">
+                  <button type="button" class="btn btn-dark btn-sm" onclick="modalZoomFit()" title="도면 전체 보기"><i class="bi bi-fullscreen"></i></button>
+                </div>
+              </div>
+            </div>
+
+            <p class="text-secondary mt-2 mb-0 text-end" id="modalDate"></p>
+          </div>
+
+          <div class="modal-footer border-secondary d-flex gap-2">
+            <button class="btn btn-success flex-grow-1 fw-bold py-3" onclick="openViewer()">
+              <i class="bi bi-eye-fill"></i> 이미지 보기
+            </button>
+            <button class="btn btn-warning flex-grow-1 fw-bold py-3" onclick="downloadDXF()">
+              <i class="bi bi-filetype-dxf"></i> DXF 다운로드
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const v = `
+    <div id="fullScreenViewer" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:black;z-index:9999;flex-direction:column;overflow:hidden;">
+      <div style="position:absolute;top:16px;left:16px;z-index:10000;display:flex;gap:10px;">
+        <button class="btn btn-light btn-sm fw-bold px-3" onclick="closeViewer()">닫기</button>
+        <button class="btn btn-outline-light btn-sm fw-bold px-3" onclick="viewerReset()">리셋</button>
+      </div>
+
+      <!-- ✅ 전체화면 줌 컨트롤 -->
+      <div style="position:absolute; left:12px; bottom:12px; z-index:10000; display:flex; flex-direction:column; gap:8px; padding:10px; border-radius:14px; background:rgba(0,0,0,.45); backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.12);">
+        <div style="display:flex; justify-content:center; gap:8px;">
+          <button type="button" class="btn btn-dark btn-sm" onclick="viewerZoom(1.15)" title="확대"><i class="bi bi-zoom-in"></i></button>
+        </div>
+        <div style="display:flex; justify-content:center; gap:8px;">
+          <button type="button" class="btn btn-dark btn-sm" onclick="viewerZoom(1/1.15)" title="축소"><i class="bi bi-zoom-out"></i></button>
+        </div>
+        <div style="display:flex; justify-content:center; gap:8px;">
+          <button type="button" class="btn btn-dark btn-sm" onclick="viewerZoomFit()" title="도면 전체 보기"><i class="bi bi-fullscreen"></i></button>
+        </div>
+      </div>
+
+      <div style="width:100%;height:100%;display:flex;justify-content:center;align-items:center;cursor:grab;">
+        <img id="viewerImage" style="max-width:none;transition:transform 0.1s linear;">
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', m + v);
+
+  // 생성 직후 1회 init
+  setTimeout(() => initModalCanvasInteraction(), 0);
+  setTimeout(() => initViewer(), 0);
+}
+
+// ✅ 삭제 함수
+function deleteItem(siteName) {
+  if (!confirm(`⚠️ 정말 '${siteName}' 도면을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
+    return;
+  }
+
+  if (window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(res => {
+        alert(res);
+        loadList(); // 목록 새로고침
+      })
+      .withFailureHandler(err => {
+        const msg = (err && err.message) ? err.message : String(err);
+        alert('❌ 삭제 실패: ' + msg);
+      })
+      .deleteFromSheet(siteName);
+  } else {
+    alert('테스트 모드: 삭제 기능은 실제 환경에서만 작동합니다.');
+  }
+}
+
+</script>

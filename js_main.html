@@ -1,0 +1,117 @@
+<script>
+/* =========================================================
+  ✅ 화면이동(손모양) 모드 (js_drawing과 연동)
+========================================================= */
+window.__PAN_MODE__ = false;
+window.__PREV_MODE_TEXT__ = null; // ✅ 손모양 켜기 전 모드 표시 저장
+
+/** 외부에서도 호출 가능: ON/OFF 세팅 */
+function setPanMode(on) {
+  const next = !!on;
+
+  // ✅ 켜기 전에 현재 모드 문구 저장(벽체/가구/지우개 등)
+  const md = document.getElementById('mode-display');
+  if (!window.__PAN_MODE__ && next && md) {
+    window.__PREV_MODE_TEXT__ = md.innerText; 
+  }
+
+  window.__PAN_MODE__ = next;
+
+  // 버튼 UI (왼쪽 nav-controls 버튼)
+  const btn = document.getElementById('btn-pan-left');
+  if (btn) btn.classList.toggle('active', window.__PAN_MODE__);
+
+  // js_drawing에 반영
+  if (typeof window.applyPanMode === 'function') {
+    window.applyPanMode(window.__PAN_MODE__);
+  }
+
+  // 모드 표시(손모양 ON: 화면이동 / OFF: 원래 문구 복원)
+  if (md) {
+    if (window.__PAN_MODE__) {
+      md.innerText = '현재: 화면이동';
+    } else {
+      md.innerText = window.__PREV_MODE_TEXT__ || md.innerText || '현재: 벽체';
+      window.__PREV_MODE_TEXT__ = null;
+    }
+  }
+
+  // 커서 변경(PC에서 체감)
+  const cvsEl = document.getElementById('cadCanvas');
+  if (cvsEl) cvsEl.style.cursor = window.__PAN_MODE__ ? 'grab' : 'crosshair';
+}
+
+/** 손모양 버튼 토글 */
+function togglePanMode() {
+  setPanMode(!window.__PAN_MODE__);
+}
+
+/* =========================================================
+  ✅ 화면 전환
+========================================================= */
+function goScreen(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const target = document.getElementById('screen-' + screenId);
+  if (target) target.classList.add('active');
+
+  if (screenId === 'draw') {
+    setTimeout(() => {
+      // 캔버스 리사이즈
+      if (typeof resizeCanvas === 'function') resizeCanvas();
+
+      // 툴바 기본 펼침
+      const drawScreen = document.getElementById('screen-draw');
+      if (drawScreen) drawScreen.classList.remove('toolbar-collapsed');
+
+      // 토글 아이콘 기본 상태
+      const tbtn = document.getElementById('toolbar-toggle');
+      if (tbtn) tbtn.innerHTML = '<i class="bi bi-layout-sidebar-inset"></i>';
+
+      // nav-controls 표시
+      const nav = document.getElementById('nav-controls');
+      if (nav) nav.style.display = 'flex';
+
+      // ✅ 도면 진입 시 화면이동 OFF
+      setPanMode(false);
+
+      // ✅ 기본 모드(벽체)
+      if (typeof setMode === 'function') setMode('wall');
+    }, 100);
+  } else {
+    setPanMode(false);
+  }
+
+  if (screenId === 'list') {
+    if (typeof loadList === 'function') setTimeout(() => loadList(), 50);
+  }
+
+  if (screenId === 'estimate') {
+    if (typeof initEstimateScreen === 'function') setTimeout(() => initEstimateScreen(), 50);
+  }
+
+  if (screenId === 'settings') {
+    // 세팅 화면 진입 시 인증 확인
+    if (typeof initSettingsScreen === 'function') setTimeout(() => initSettingsScreen(), 50);
+  } else {
+    // 다른 화면으로 이동 시 인증 상태는 유지 (세션 스토리지에 저장되어 있음)
+  }
+}
+
+/* =========================================================
+  ✅ 우측 툴바 숨김/펼치기
+========================================================= */
+function toggleToolbar() {
+  const drawScreen = document.getElementById('screen-draw');
+  if (!drawScreen) return;
+
+  drawScreen.classList.toggle('toolbar-collapsed');
+
+  const btn = document.getElementById('toolbar-toggle');
+  if (btn) {
+    const isCollapsed = drawScreen.classList.contains('toolbar-collapsed');
+    btn.innerHTML = isCollapsed
+      ? '<i class="bi bi-layout-sidebar-inset-reverse"></i>'
+      : '<i class="bi bi-layout-sidebar-inset"></i>';
+  }
+}
+</script>

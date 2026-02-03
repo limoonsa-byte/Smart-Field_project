@@ -1,0 +1,338 @@
+<style>
+  body, html { 
+    width: 100%; 
+    height: 100%; 
+    overflow: hidden; 
+    background: #222; 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+    touch-action: none; 
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+  }
+
+  .screen { 
+    display: none; 
+    width: 100%; 
+    height: 100%; 
+    position: absolute; 
+    top:0; 
+    left:0; 
+    background: #222; 
+    overflow-y: auto; /* ✅ 스크롤 가능 */
+  }
+  .screen.active { display: block; }
+
+  #top-bar { 
+    position: absolute; 
+    top:0; 
+    left:0; 
+    width:100%; 
+    height:50px; 
+    background: rgba(0,0,0,0.95); 
+    display:flex; 
+    align-items:center; 
+    padding:0 10px; 
+    z-index:50; 
+    border-bottom:1px solid #444; 
+    gap: 8px;
+  }
+
+  #info-overlay { 
+    position:absolute; 
+    top:60px; 
+    left:10px; 
+    z-index:40; 
+    color: #0f0; 
+    background: rgba(0,0,0,0.8); 
+    padding: 8px 12px; 
+    border-radius: 6px; 
+    font-size: 14px; 
+    font-weight: bold;
+    pointer-events: none; 
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+
+  #canvas-wrapper { 
+    position: absolute; 
+    top:0; 
+    left:0; 
+    width:100%; 
+    height:100%; 
+    z-index:1; 
+  }
+
+  canvas { 
+    display: block; 
+    width: 100%; 
+    height: 100%; 
+    cursor: crosshair; 
+    outline: none; 
+    background: #222;
+  }
+
+  /* ✅ 우측 툴바: 2열 그리드 (전체 2/3 축소 느낌 + 렌더 안정화) */
+  #right-controls { 
+    position: absolute; 
+    top:60px; 
+    right:8px; 
+
+    width:132px; /* 170 → 132 */
+    display:grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap:6px;     /* 8 → 6 */
+
+    z-index:200; /* ✅ 다른 요소에 눌려 안 보이는 현상 방지 */
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-top: 6px;     /* ✅ 아이콘 잘림 느낌 완화 */
+    padding-bottom: 16px;
+
+    -webkit-transform: translateZ(0); /* ✅ 모바일 렌더 안정화 */
+    transform: translateZ(0);
+  }
+  #right-controls::-webkit-scrollbar { width: 0px; display: none; }
+
+  .tool-btn { 
+    width: 100%;
+    min-height: 44px; /* 60 → 44 */
+    border-radius: 10px; 
+    background: rgba(51, 51, 51, 0.95); 
+    border:2px solid #555; 
+    color:#ccc; 
+
+    display:flex; 
+    flex-direction:column; 
+    justify-content:center; 
+    align-items:center; 
+
+    cursor:pointer; 
+    box-shadow: 0 3px 8px rgba(0,0,0,0.4); 
+    transition: all 0.15s ease; 
+    padding: 6px 4px; /* 8 → 6 */
+    backdrop-filter: blur(4px);
+
+    /* ✅ 아이콘/글씨가 가끔 안 보이는 현상 방지 */
+    overflow: visible;
+    min-width: 0;
+  }
+
+  .tool-btn i { 
+    font-size: 18px; /* 24 → 18 */
+    margin-bottom: 2px;
+    line-height: 1;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .tool-btn span { 
+    font-size: 10px; /* 11 → 10 */
+    font-weight: bold; 
+    line-height: 1.1;
+    display: block;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .tool-btn:active { 
+    transform: scale(0.94); 
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+
+  .tool-btn.active { 
+    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%); 
+    border-color: #0d6efd; 
+    color: white; 
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.4);
+  }
+  
+  /* 문 타입 버튼 활성화 스타일 */
+  .door-type-btn.active { 
+    border-width: 3px;
+    box-shadow: 0 0 15px currentColor;
+    transform: scale(1.05);
+  }
+
+  /* ✅ divider는 2열 전체 */
+  .divider { 
+    height: 2px; 
+    background: linear-gradient(90deg, transparent, #555, transparent); 
+    width: 90%; 
+    margin: 4px auto; 
+    grid-column: 1 / -1;
+  }
+
+  /* ✅ 화면이동 버튼: 2칸 전체 + 한 줄(텍스트 왼쪽 / 아이콘 오른쪽) */
+  #btn-pan{
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+  #btn-pan span{ 
+    font-size: 12px;
+    margin: 0;
+  }
+  #btn-pan i{ 
+    margin: 0;
+    font-size: 18px;
+  }
+
+  #bottom-controls { 
+    position:absolute; 
+    bottom:15px; 
+    left:50%; 
+    transform:translateX(-50%); 
+    display:flex; 
+    gap:8px; 
+    z-index:50; 
+    width: 96%; 
+    justify-content: center; 
+    max-width: 600px; 
+  }
+
+  #bottom-controls button { 
+    flex: 1; 
+    padding: 14px 8px; 
+    font-weight:bold; 
+    font-size: 15px;
+    min-height: 50px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: all 0.15s ease;
+  }
+
+  #bottom-controls button:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+
+  /* 치수 입력 모달 */
+  .center-modal { 
+    display: none; 
+    position: fixed; 
+    top: 35%; 
+    left: 50%; 
+    transform: translate(-50%, -50%); 
+    background: white; 
+    padding: 24px; 
+    border-radius: 16px; 
+    width: 90%; 
+    max-width: 340px;
+    z-index: 2000; 
+    box-shadow: 0 20px 60px rgba(0,0,0,0.8); 
+    text-align: center; 
+  }
+  .center-modal h5 { margin-bottom: 16px; font-size: 18px; color: #333; }
+  .center-modal input {
+    font-size: 32px !important;
+    padding: 16px !important;
+    border: 2px solid #0d6efd !important;
+    border-radius: 12px !important;
+    margin-bottom: 16px;
+  }
+  .center-modal button {
+    min-height: 50px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 10px;
+  }
+
+  @media (min-width: 768px) {
+    #right-controls { 
+      width: 140px; /* 데스크탑에서도 살짝 작게 */
+      top:65px; 
+      right:12px; 
+      gap:8px; 
+    }
+    .tool-btn { min-height: 50px; }
+    .tool-btn i { font-size: 20px; }
+    .tool-btn span { font-size: 11px; }
+    #btn-pan span{ font-size: 13px; }
+    #bottom-controls { bottom: 20px; gap: 12px; }
+    #bottom-controls button { padding: 16px 12px; font-size: 16px; }
+  }
+
+  input[type="text"], input[type="number"], select {
+    font-size: 16px !important;
+    padding: 8px 12px;
+    border-radius: 6px;
+  }
+
+  .spinner-border { width: 3rem; height: 3rem; }
+
+  /* ✅ 모바일 툴바 숨김/펼치기 */
+  #right-controls{
+    transition: transform .18s ease, opacity .18s ease;
+  }
+
+  #screen-draw.toolbar-collapsed #right-controls{
+    transform: translateX(110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 토글 버튼 (무조건 위로) */
+  #toolbar-toggle{
+    position: absolute;
+    top: 64px;
+    right: 10px;
+    z-index: 9999;
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.2);
+    background: rgba(0,0,0,.6);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+  }
+
+  /* ✅ 도면그리기 줌/이동 버튼 */
+  #nav-controls{
+    position:absolute;
+    left:10px;
+    bottom:90px;
+    z-index:180;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:10px;
+    border-radius:14px;
+    background:rgba(0,0,0,.45);
+    backdrop-filter: blur(6px);
+    border:1px solid rgba(255,255,255,.12);
+  }
+
+  #nav-controls .nav-row{ display:flex; gap:8px; justify-content:center; }
+  #nav-controls .nav-divider{ height:1px; background:rgba(255,255,255,.15); margin:4px 0; }
+
+  #nav-controls .nav-btn{
+    width:44px; height:44px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.2);
+    background:rgba(0,0,0,.55);
+    color:#fff;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #nav-controls .nav-btn:active{ transform:scale(.95); }
+  #nav-controls .nav-btn.active{
+    background:#0d6efd;
+    border-color:#0d6efd;
+    box-shadow:0 0 8px rgba(13,110,253,.5);
+  }
+
+  /* PDF 인쇄 시: 버튼·닫기 등 숨김 */
+  @media print {
+    .btn, #toolbar-toggle, #nav-controls, .nav-btn, button { display: none !important; }
+    .screen { overflow: visible !important; }
+    body, .screen { background: #fff !important; }
+    .text-white { color: #000 !important; }
+    .bg-dark { background: #fff !important; }
+    .border-secondary { border-color: #ccc !important; }
+  }
+</style>

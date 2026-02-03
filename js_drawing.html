@@ -1,0 +1,1354 @@
+<script>
+const cvs = document.getElementById('cadCanvas');
+const ctx = cvs.getContext('2d');
+const wrapper = document.getElementById('canvas-wrapper');
+
+// 데이터
+let points = [], zones = [], freeWalls = [], furnitureLines = [], doors = [];
+
+// 문 타입 정의
+const DOOR_TYPES = {
+  ROOM: 'room',        // 방문
+  ENTRANCE: 'entrance', // 현관문
+  VERANDA: 'veranda',   // 베란다문
+  MIDDLE: 'middle'      // 중문
+};
+
+let currentDoorType = DOOR_TYPES.ROOM; // 현재 선택된 문 타입
+
+// 설정
+let config = {
+  panX: 0, panY: 0, scale: 1,
+  minScale: 0.02,
+  maxScale: 12,
+  isOrtho: true,
+  isSmartSnap: true,
+  snapDist: 35, // ✅ 스냅 거리 증가 (20 → 35)
+  fontSize: 18
+};
+
+function clampScale(s){
+  return Math.max(config.minScale, Math.min(config.maxScale, s));
+}
+
+/** =========================
+ * ✅ 도면그리기 줌/이동 버튼용 (HTML에서 호출됨)
+ *  - (이게 없으면 JS 에러로 하단버튼/토글도 같이 먹통날 수 있음)
+ ========================== */
+function zoomAtCenter(factor){
+  const oldScale = config.scale;
+  const newScale = clampScale(config.scale * factor);
+  if (newScale === oldScale) return;
+
+  const cx = cvs.width / 2;
+  const cy = cvs.height / 2;
+
+  config.panX = cx - (cx - config.panX) * (newScale / oldScale);
+  config.panY = cy - (cy - config.panY) * (newScale / oldScale);
+  config.scale = newScale;
+  draw();
+}
+
+function panBy(dx, dy){
+  config.panX += dx;
+  config.panY += dy;
+  draw();
+}
+
+function resetView(){
+  config.scale = 1;
+  config.panX = cvs.width / 2;
+  config.panY = cvs.height / 2;
+  draw();
+}
+
+function zoomFit(){
+  // 모든 점 수집
+  let allPoints = [];
+  
+  points.forEach(p => allPoints.push(p));
+  freeWalls.forEach(w => w.forEach(p => allPoints.push(p)));
+  zones.forEach(z => z.pts.forEach(p => allPoints.push(p)));
+  furnitureLines.forEach(f => {
+    allPoints.push(f.p1);
+    allPoints.push(f.p2);
+  });
+  doors.forEach(d => allPoints.push({x: d.x, y: d.y}));
+  
+  if(allPoints.length === 0) {
+    resetView();
+    return;
+  }
+  
+  // 범위 계산
+  let minX = allPoints[0].x, maxX = allPoints[0].x;
+  let minY = allPoints[0].y, maxY = allPoints[0].y;
+  
+  allPoints.forEach(p => {
+    if(p.x < minX) minX = p.x;
+    if(p.x > maxX) maxX = p.x;
+    if(p.y < minY) minY = p.y;
+    if(p.y > maxY) maxY = p.y;
+  });
+  
+  // 중심 계산
+  let centerX = (minX + maxX) / 2;
+  let centerY = (minY + maxY) / 2;
+  
+  // 크기 계산
+  let width = maxX - minX;
+  let height = maxY - minY;
+  
+  // 여백 추가 (20%)
+  width *= 1.2;
+  height *= 1.2;
+  
+  // 스케일 계산
+  let scaleX = cvs.width / width;
+  let scaleY = cvs.height / height;
+  let newScale = Math.min(scaleX, scaleY);
+  
+  // 제한 적용
+  newScale = clampScale(newScale);
+  
+  // 적용
+  config.scale = newScale;
+  config.panX = cvs.width / 2 - centerX * newScale;
+  config.panY = cvs.height / 2 - centerY * newScale;
+  
+  draw();
+}
+
+// 마우스/터치 상태
+let mouse = { x:0, y:0, rawX:0, rawY:0, snapped:false, snapLine:null };
+let snapTarget = null;
+
+let state = {
+  draggingCanvas:false,
+  draggingItem:null,
+  lastX:0, lastY:0,
+  selectedItem:null,
+
+  isGesturing:false,
+  touchStartDist:0,
+  touchStartScale:1,
+
+  pointerType:'mouse',
+  gestureUsed:false,
+  blockDrawUntilAllUp:false,
+
+  // ✅ “끊기” 직후 조인 강제용
+  afterBreakLine:false,
+
+  // ✅ 더블탭/더블클릭로 문 폭 변경
+  lastTapTime: 0,
+  lastTapX: 0,
+  lastTapY: 0,
+
+  // ✅ NEW: 화면이동(손모양) 모드 상태
+  panMode: false
+};
+
+/** =========================================================
+ * ✅ NEW: js_main(setPanMode) ↔ js_drawing 연동용
+ *  - js_main에서 window.applyPanMode(true/false)를 호출함
+ *  - 여기 없으면 "버튼은 눌리는데 실제로 안 움직임/오동작" 발생
+ ========================================================= */
+window.applyPanMode = function(on){
+  state.panMode = !!on;
+
+  // 켜는 순간: 그리기 중인 선이 있으면 안전하게 취소
+  points = [];
+  snapTarget = null;
+  mouse.snapped = false;
+  mouse.snapLine = null;
+
+  // 끄는 순간: 드래그 상태 정리
+  if(!state.panMode){
+    state.draggingCanvas = false;
+  }
+
+  draw();
+};
+
+let mode = { current:'wall', subType:'' };
+
+// ✅ 입력 모달 용도 (벽/가구/문)
+let inputContext = { type: 'wall' }; // 'wall' | 'furniture' | 'door'
+let pendingFurnitureType = null;
+let pendingDoorIndex = null;
+
+function resizeCanvas(){
+  cvs.width = wrapper.clientWidth;
+  cvs.height = wrapper.clientHeight;
+  if (config.panX === 0) { config.panX = cvs.width/2; config.panY = cvs.height/2; }
+  draw();
+}
+window.addEventListener('resize', resizeCanvas);
+setTimeout(resizeCanvas, 80);
+
+// ===== 그리기 =====
+function draw(){
+  ctx.fillStyle = '#222';
+  ctx.fillRect(0,0,cvs.width,cvs.height);
+
+  ctx.save();
+  ctx.translate(config.panX, config.panY);
+  ctx.scale(config.scale, config.scale);
+
+  // 그리드
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1/config.scale;
+  ctx.beginPath();
+  let gs = 1000, lx = -config.panX/config.scale, ly = -config.panY/config.scale;
+  let rx = lx + cvs.width/config.scale, by = ly + cvs.height/config.scale;
+  for(let x=Math.floor(lx/gs)*gs; x<rx; x+=gs){ ctx.moveTo(x,ly); ctx.lineTo(x,by); }
+  for(let y=Math.floor(ly/gs)*gs; y<by; y+=gs){ ctx.moveTo(lx,y); ctx.lineTo(rx,y); }
+  ctx.stroke();
+
+  // 구역
+  zones.forEach(z=>{
+    ctx.beginPath();
+    z.pts.forEach((p,i)=> i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+    ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.1)'; ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2/config.scale; ctx.stroke();
+
+    let cx=0, cy=0;
+    z.pts.forEach(p=>{cx+=p.x; cy+=p.y});
+    cx/=z.pts.length; cy/=z.pts.length;
+
+    label(z.name, cx, cy-15/config.scale, '#fff');
+    label(z.area+"m²", cx, cy+15/config.scale, '#0f0');
+    for(let i=0; i<z.pts.length; i++) dim(z.pts[i], z.pts[(i+1)%z.pts.length]);
+  });
+
+  // 벽선
+  freeWalls.forEach(w=>{
+    ctx.beginPath();
+    w.forEach((p,i)=> i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+    ctx.strokeStyle='#0f0'; ctx.lineWidth=2/config.scale; ctx.stroke();
+    point(w[0],'#0f0'); point(w[w.length-1],'#0f0');
+    for(let i=0; i<w.length-1; i++) dim(w[i], w[i+1]);
+  });
+
+  // 가구
+  function fmtLen(mm){ return String(Math.round(Number(mm) || 0)); }
+
+  function furnitureLabelPos(f, idx){
+    const mx = (f.p1.x + f.p2.x) / 2;
+    const my = (f.p1.y + f.p2.y) / 2;
+
+    const dx = f.p2.x - f.p1.x;
+    const dy = f.p2.y - f.p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+
+    let nx = -dy / len;
+    let ny =  dx / len;
+
+    const side = (idx % 2 === 0) ? 1 : -1;
+    const baseOffset = 260;
+    const extra = Math.min(4, Math.floor(idx / 2)) * 120;
+    const off = (baseOffset + extra) * side;
+
+    const slide = ((idx % 3) - 1) * 160;
+    const tx = (dx / len) * slide;
+    const ty = (dy / len) * slide;
+
+    return { x: mx + nx * off + tx, y: my + ny * off + ty };
+  }
+
+  furnitureLines.forEach((f, idx) => {
+    ctx.beginPath();
+    ctx.moveTo(f.p1.x, f.p1.y);
+    ctx.lineTo(f.p2.x, f.p2.y);
+
+    let col = (f.type === 'closet') ? '#0dcaf0' : (f.type === 'sink') ? '#198754' : '#ffc107';
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 4 / config.scale;
+    ctx.stroke();
+
+    const p = furnitureLabelPos(f, idx);
+    const txt = `${f.name} ${fmtLen(f.len)}`;
+    label(txt, p.x, p.y, '#fff', true);
+  });
+
+  // 문 (✅ 폭 변경 지원: d.width, 타입별 색상)
+  doors.forEach((d,i)=>{
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate((d.rotation||0)*Math.PI/2);
+    if(d.flipped) ctx.scale(1,-1);
+
+    if(state.selectedItem && state.selectedItem.type==='door' && state.selectedItem.index===i){
+      ctx.shadowColor="white";
+      ctx.shadowBlur=15;
+    }
+
+    const s = Number(d.width) || 900; // ✅ 문 폭(기본 900)
+    
+    // ✅ 타입별 색상
+    const doorType = d.doorType || DOOR_TYPES.ROOM;
+    let doorColor;
+    switch(doorType) {
+      case DOOR_TYPES.ENTRANCE: doorColor = '#198754'; break; // 초록 (현관문)
+      case DOOR_TYPES.VERANDA: doorColor = '#0dcaf0'; break; // 청록 (베란다문)
+      case DOOR_TYPES.MIDDLE: doorColor = '#ffc107'; break; // 노랑 (중문)
+      default: doorColor = '#dc3545'; break; // 빨강 (방문)
+    }
+    
+    ctx.strokeStyle = doorColor;
+    ctx.lineWidth=2/config.scale;
+
+    ctx.strokeRect(-10/config.scale, -s/2, 20/config.scale, s);
+    ctx.beginPath(); ctx.moveTo(0,-s/2); ctx.arc(0,-s/2,s,0,Math.PI/2,false); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,-s/2); ctx.lineTo(0,s/2); ctx.stroke();
+    ctx.fillStyle='#dc3545'; ctx.beginPath(); ctx.arc(0,-s/2,5/config.scale,0,Math.PI*2); ctx.fill();
+
+    // ✅ 선택된 문이면 폭 텍스트 표시(숫자만)
+    if(state.selectedItem && state.selectedItem.type==='door' && state.selectedItem.index===i){
+      label(String(Math.round(s)), 0, 0, '#fff', true);
+    }
+
+    ctx.restore();
+  });
+
+  // 그리는 중 선
+  if(points.length>0){
+    ctx.beginPath();
+    ctx.strokeStyle = mode.current==='wall' ? '#0f0' : '#0ff';
+    ctx.lineWidth = 2/config.scale;
+    ctx.moveTo(points[0].x, points[0].y);
+    points.forEach(p=>ctx.lineTo(p.x,p.y));
+    ctx.lineTo(mouse.x,mouse.y);
+    ctx.stroke();
+
+    dim(points[points.length-1], mouse, true);
+
+    if(config.isOrtho){
+      ctx.beginPath();
+      ctx.strokeStyle='rgba(0,255,0,0.5)';
+      ctx.setLineDash([5/config.scale,5/config.scale]);
+      ctx.moveTo(points[points.length-1].x, points[points.length-1].y);
+      ctx.lineTo(mouse.x,mouse.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // ✅ 스냅 가능한 점들 미리 표시 (벽체 그리기 중일 때만)
+  if (mode.current === 'wall' && config.isSmartSnap) {
+    let snapRadius = config.snapDist / config.scale;
+    let mx = mouse.rawX, my = mouse.rawY;
+    
+    // freeWalls의 끝점들
+    freeWalls.forEach(w => {
+      // 시작점
+      if (Math.hypot(w[0].x - mx, w[0].y - my) < snapRadius * 2) {
+        ctx.beginPath();
+        ctx.arc(w[0].x, w[0].y, 10/config.scale, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
+        ctx.lineWidth = 2/config.scale;
+        ctx.stroke();
+      }
+      // 끝점
+      let last = w[w.length-1];
+      if (Math.hypot(last.x - mx, last.y - my) < snapRadius * 2) {
+        ctx.beginPath();
+        ctx.arc(last.x, last.y, 10/config.scale, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
+        ctx.lineWidth = 2/config.scale;
+        ctx.stroke();
+      }
+    });
+    
+    // 현재 그리고 있는 선의 시작점
+    if (points.length > 0) {
+      if (Math.hypot(points[0].x - mx, points[0].y - my) < snapRadius * 2) {
+        ctx.beginPath();
+        ctx.arc(points[0].x, points[0].y, 10/config.scale, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+        ctx.lineWidth = 2/config.scale;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // 스냅 표시 (실제 스냅됨)
+  if(mouse.snapped){
+    ctx.strokeStyle='#0f0'; // 녹색으로 변경 (더 눈에 띄게)
+    ctx.lineWidth=3/config.scale; // 두께 증가
+    ctx.fillStyle='rgba(0, 255, 0, 0.2)';
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, 12/config.scale, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // 스마트스냅 연장선
+  if(config.isSmartSnap && mouse.snapLine){
+    ctx.beginPath();
+    ctx.strokeStyle='#ff0';
+    ctx.lineWidth=1/config.scale;
+    ctx.setLineDash([4/config.scale, 4/config.scale]);
+    if(mouse.snapLine.type==='x'){
+      ctx.moveTo(mouse.snapLine.val, mouse.y - 10000);
+      ctx.lineTo(mouse.snapLine.val, mouse.y + 10000);
+    } else {
+      ctx.moveTo(mouse.x - 10000, mouse.snapLine.val);
+      ctx.lineTo(mouse.x + 10000, mouse.snapLine.val);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
+}
+
+function point(p,col){
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,5/config.scale,0,Math.PI*2);
+  ctx.fill();
+}
+
+function label(txt,x,y,col,bg=false){
+  let fs=bg?config.fontSize:config.fontSize+2;
+  ctx.font=`bold ${fs/config.scale}px sans-serif`;
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  if(bg){
+    let w=ctx.measureText(txt).width+10/config.scale;
+    let h=(fs+4)/config.scale;
+    ctx.fillStyle='rgba(0,0,0,0.8)';
+    ctx.fillRect(x-w/2,y-h/2,w,h);
+  }
+  ctx.fillStyle=col;
+  ctx.fillText(txt,x,y);
+}
+
+function dim(p1,p2,hl=false, color='#ff0'){
+  let m={x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2};
+  let d=Math.round(Math.hypot(p2.x-p1.x,p2.y-p1.y));
+  label(d,m.x,m.y,hl?'#fff':color,true);
+}
+
+/** =========================
+ * ✅ 이벤트 (터치/마우스)
+ ========================== */
+
+// 터치
+wrapper.addEventListener('touchstart', e => {
+  e.preventDefault();
+  state.pointerType = 'touch';
+
+  if (state.blockDrawUntilAllUp) return;
+
+  // ✅ 2손가락 = 핀치(그리기 잠금)
+  if (e.touches.length === 2) {
+    state.isGesturing = true;
+    state.gestureUsed = false;
+    state.blockDrawUntilAllUp = true;
+
+    // ❌ 그리기 취소하지 않음 - 줌/팬 후에도 이어서 그릴 수 있도록
+    // points = [];
+    // snapTarget = null;
+    // mouse.snapped = false;
+    // mouse.snapLine = null;
+
+    state.touchStartDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    state.touchStartScale = config.scale;
+    state.lastX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    state.lastY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    draw();
+    return;
+  }
+
+  // ✅ 1손가락 = 일반 동작 (더블탭 감지)
+  if (e.touches.length === 1) {
+    state.isGesturing = false;
+    state.blockDrawUntilAllUp = false;
+
+    const now = Date.now();
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+
+    // ✅ 더블탭: 문 폭 변경
+    if (now - state.lastTapTime < 320 && Math.hypot(x - state.lastTapX, y - state.lastTapY) < 22) {
+      // 더블탭 처리
+      handleDoubleTap(x, y);
+      state.lastTapTime = 0;
+      return;
+    }
+
+    state.lastTapTime = now;
+    state.lastTapX = x;
+    state.lastTapY = y;
+
+    handlePointerDown(x, y, 0);
+  }
+}, { passive:false });
+
+wrapper.addEventListener('touchmove', e => {
+  e.preventDefault();
+
+  // 핀치
+  if (state.isGesturing && e.touches.length === 2) {
+    let dist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    let cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    let cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+    const panDx = cx - state.lastX;
+    const panDy = cy - state.lastY;
+
+    config.panX += panDx;
+    config.panY += panDy;
+    state.lastX = cx;
+    state.lastY = cy;
+
+    let zoomDelta = dist / state.touchStartDist;
+    config.scale = clampScale(state.touchStartScale * zoomDelta);
+
+    draw();
+    return;
+  }
+
+  // 한손가락 이동
+  if (e.touches.length === 1 && !state.isGesturing && !state.blockDrawUntilAllUp) {
+    handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive:false });
+
+wrapper.addEventListener('touchend', e => {
+  e.preventDefault();
+
+  if (e.touches.length === 0) {
+    state.isGesturing = false;
+    state.blockDrawUntilAllUp = false;
+    state.gestureUsed = false;
+    state.draggingCanvas = false;
+    state.draggingItem = null;
+    handlePointerUp();
+    return;
+  }
+
+  // 핀치 후 1개 남는 경우: 잠금 유지
+  if (e.touches.length === 1) {
+    state.isGesturing = false;
+    return;
+  }
+}, { passive:false });
+
+// 마우스
+wrapper.addEventListener('mousedown', e => {
+  state.pointerType = 'mouse';
+  handlePointerDown(e.clientX, e.clientY, e.button);
+});
+wrapper.addEventListener('mousemove', e => {
+  if (state.pointerType === 'mouse') handlePointerMove(e.clientX, e.clientY);
+});
+wrapper.addEventListener('mouseup', e => {
+  if (state.pointerType === 'mouse') handlePointerUp();
+});
+
+// ✅ 더블클릭: 문 폭 변경
+wrapper.addEventListener('dblclick', (e) => {
+  state.pointerType = 'mouse';
+  handleDoubleTap(e.clientX, e.clientY);
+});
+
+// 휠 줌
+wrapper.addEventListener('wheel', e => {
+  e.preventDefault();
+  let oldScale = config.scale;
+
+  let next = config.scale * (e.deltaY > 0 ? 0.9 : 1.1);
+  config.scale = clampScale(next);
+
+  let rect = wrapper.getBoundingClientRect();
+  let mouseX = e.clientX - rect.left;
+  let mouseY = e.clientY - rect.top;
+
+  config.panX = mouseX - (mouseX - config.panX) * (config.scale / oldScale);
+  config.panY = mouseY - (mouseY - config.panY) * (config.scale / oldScale);
+
+  draw();
+}, { passive:false });
+
+/** =========================
+ * ✅ 공통 로직
+ ========================== */
+function handlePointerDown(cx, cy, button=0){
+  if (state.pointerType === 'touch' && (state.isGesturing || state.blockDrawUntilAllUp)) return;
+
+  // ✅ NEW: PAN(화면이동) 모드일 때는 "그리기" 말고 화면 드래그만
+  // - 좌클릭/한손가락만 적용
+  if (state.panMode && button === 0) {
+    state.draggingCanvas = true;
+    state.lastX = cx;
+    state.lastY = cy;
+    return;
+  }
+
+  // 우클릭/중클릭 드래그(PC)
+  if (button !== 0 && state.pointerType === 'mouse') {
+    state.draggingCanvas = true;
+    state.lastX = cx;
+    state.lastY = cy;
+    return;
+  }
+
+  updateMousePosition(cx, cy);
+  calculateSnap();
+
+  // ✅ 선 그리는 중에는 다른 툴 클릭으로 삭제(초기화) 방지
+  // (여기서는 클릭 자체는 진행하지만, setMode에서 막습니다. 아래 delete는 예외)
+  if (mode.current === 'delete') {
+    handleClickDelete();
+    return;
+  }
+
+  // 아이템 선택/드래그 (문/가구)
+  if (points.length === 0 && !snapTarget) {
+    let hit = checkHitItem(mouse.x, mouse.y);
+    if (hit) {
+      state.draggingItem = hit;
+      state.selectedItem = hit;
+      state.lastX = mouse.x;
+      state.lastY = mouse.y;
+      return;
+    }
+  }
+
+  // ✅ 점 추가
+  points.push({ x: mouse.x, y: mouse.y });
+
+  // ✅ 스냅 처리
+  if (snapTarget) {
+    // (1) 시작점으로 닫기
+    if (snapTarget.type === 'start' && points.length > 2) {
+      points.pop();
+      finishZone();
+      return;
+    }
+
+    // (2) 끊기 이후 조인 강제: 시작점(첫 점)에서도 wallEnd면 흡수
+    //     - 평소에는 “첫 점에서 흡수” 막지만, 끊기 직후만 허용
+    // ✅ 첫 점이든 두 번째 점이든 wallEnd에 스냅되면 조인
+    if (snapTarget.type === 'wallEnd' && points.length >= 1) {
+      let other = freeWalls[snapTarget.index];
+      
+      // ✅ 첫 점일 때: 벽을 앞에, head면 뒤집기
+      if (points.length === 1) {
+        if (snapTarget.end === 'head') other = [...other].reverse();
+        points.pop();
+        points = other;
+      }
+      // ✅ 두 번째 이후 점: 벽을 뒤에, tail이면 뒤집기
+      else {
+        if (snapTarget.end === 'tail') other = [...other].reverse();
+        points.pop();
+        points = points.concat(other);
+      }
+
+      // 흡수된 벽 제거
+      freeWalls.splice(snapTarget.index, 1);
+
+      // 끊기 플래그 소모
+      state.afterBreakLine = false;
+
+      // 흡수 후 자동 닫힘 체크
+      if (points.length > 2 && Math.hypot(points[0].x - points[points.length-1].x, points[0].y - points[points.length-1].y) < 1) {
+        finishZone();
+        return;
+      }
+
+      draw();
+      return;
+    }
+  }
+
+  // ✅ 가구: 2점 찍으면 길이 입력
+  if (mode.current === 'furniture' && points.length === 2) {
+    inputContext.type = 'furniture';
+    pendingFurnitureType = mode.subType;
+    setTimeout(openInputModal, 50);
+    draw();
+    return;
+  }
+
+  // ✅ 벽: 2점 이상이면 길이 입력
+  if (mode.current === 'wall' && points.length > 1 && !snapTarget) {
+    inputContext.type = 'wall';
+    setTimeout(openInputModal, 50);
+  }
+
+  // 끊기 직후에 “조인 시도” 아니면 플래그 유지 (다음 클릭까지 유지)
+  draw();
+}
+
+function handlePointerMove(cx, cy){
+  if (state.draggingCanvas) {
+    config.panX += cx - state.lastX;
+    config.panY += cy - state.lastY;
+    state.lastX = cx;
+    state.lastY = cy;
+    draw();
+    return;
+  }
+
+  updateMousePosition(cx, cy);
+
+  // 아이템 드래그
+  if (state.draggingItem) {
+    let dx = mouse.x - state.lastX, dy = mouse.y - state.lastY;
+
+    if (state.draggingItem.type === 'door') {
+      doors[state.draggingItem.index].x += dx;
+      doors[state.draggingItem.index].y += dy;
+    } else if (state.draggingItem.type === 'furniture') {
+      let f = furnitureLines[state.draggingItem.index];
+      f.p1.x += dx; f.p1.y += dy;
+      f.p2.x += dx; f.p2.y += dy;
+    }
+
+    state.lastX = mouse.x;
+    state.lastY = mouse.y;
+    draw();
+    return;
+  }
+
+  calculateSnap();
+  draw();
+}
+
+function handlePointerUp(){
+  state.draggingCanvas = false;
+  if (state.draggingItem) state.selectedItem = { ...state.draggingItem };
+  state.draggingItem = null;
+}
+
+function updateMousePosition(cx, cy){
+  let r = wrapper.getBoundingClientRect();
+  let rx = (cx - r.left - config.panX) / config.scale;
+  let ry = (cy - r.top - config.panY) / config.scale;
+  mouse.rawX = rx;
+  mouse.rawY = ry;
+  mouse.x = rx;
+  mouse.y = ry;
+}
+
+function calculateSnap(){
+  let rx = mouse.rawX, ry = mouse.rawY;
+
+  mouse.snapped=false; mouse.snapLine=null; snapTarget=null;
+
+  let targets = [];
+  freeWalls.forEach((w, i) => {
+    targets.push({ x:w[0].x, y:w[0].y, type:'wallEnd', index:i, end:'head' });
+    targets.push({ x:w[w.length-1].x, y:w[w.length-1].y, type:'wallEnd', index:i, end:'tail' });
+  });
+
+  if (points.length > 0) targets.push({ x:points[0].x, y:points[0].y, type:'start' });
+
+  zones.forEach(z => z.pts.forEach(p => targets.push({ x:p.x, y:p.y, type:'point' })));
+  furnitureLines.forEach(f => {
+    targets.push({ x:f.p1.x, y:f.p1.y, type:'point' });
+    targets.push({ x:f.p2.x, y:f.p2.y, type:'point' });
+  });
+
+  let md = config.snapDist / config.scale;
+  let tx = rx, ty = ry;
+
+  // 1) 점 스냅
+  for (let t of targets) {
+    if (Math.hypot(t.x - rx, t.y - ry) < md) {
+      tx=t.x; ty=t.y;
+      mouse.snapped=true;
+      if (t.type === 'wallEnd' || t.type === 'start') snapTarget = t;
+      break;
+    }
+  }
+
+  // 2) 직교 + 스마트스냅
+  if (!mouse.snapped) {
+    if (config.isOrtho && points.length > 0) {
+      let l = points[points.length - 1];
+      if (Math.abs(rx - l.x) > Math.abs(ry - l.y)) ty = l.y;
+      else tx = l.x;
+    }
+    if (config.isSmartSnap) {
+      for (let t of targets) {
+        if (Math.abs(tx - t.x) < md/2) { tx = t.x; mouse.snapLine={type:'x', val:t.x}; break; }
+        if (Math.abs(ty - t.y) < md/2) { ty = t.y; mouse.snapLine={type:'y', val:t.y}; break; }
+      }
+    }
+  }
+
+  mouse.x = tx; mouse.y = ty;
+}
+
+function checkHitItem(x,y){
+  let d = 20/config.scale;
+  for(let i=doors.length-1;i>=0;i--){
+    if(Math.hypot(doors[i].x-x,doors[i].y-y)<d*2) return {type:'door', index:i};
+  }
+  for(let i=furnitureLines.length-1;i>=0;i--){
+    let f=furnitureLines[i];
+    if(pointToLineDist(x,y,f.p1.x,f.p1.y,f.p2.x,f.p2.y)<d) return {type:'furniture', index:i};
+  }
+  return null;
+}
+
+function pointToLineDist(x,y,x1,y1,x2,y2){
+  let A=x-x1, B=y-y1, C=x2-x1, D=y2-y1;
+  let dot=A*C+B*D, len=C*C+D*D, p=-1;
+  if(len!=0) p=dot/len;
+  let xx,yy;
+  if(p<0){xx=x1;yy=y1}
+  else if(p>1){xx=x2;yy=y2}
+  else{xx=x1+p*C;yy=y1+p*D}
+  return Math.hypot(x-xx,y-yy);
+}
+
+function isPointInPoly(p,poly){
+  let inP=false; let j=poly.length-1;
+  for(let i=0; i<poly.length; j=i++){
+    if((poly[i].y>p.y)!=(poly[j].y>p.y) &&
+      p.x < (poly[j].x-poly[i].x)*(p.y-poly[i].y)/(poly[j].y-poly[i].y)+poly[i].x) {
+      inP=!inP;
+    }
+  }
+  return inP;
+}
+
+/** =========================
+ * ✅ “구획완성이후 선 삭제기능”
+ *  - delete 모드에서 구역의 ‘선(엣지)’ 클릭하면:
+ *    “구역 해제 + 벽선으로 변환(클릭한 선은 삭제)” 처리
+ ========================== */
+function findZoneEdgeHit(mx, my, d){
+  for(let zi = zones.length-1; zi>=0; zi--){
+    const pts = zones[zi].pts || [];
+    if (pts.length < 3) continue;
+    for(let i=0; i<pts.length; i++){
+      const p1 = pts[i];
+      const p2 = pts[(i+1) % pts.length];
+      if(pointToLineDist(mx,my,p1.x,p1.y,p2.x,p2.y) < d){
+        return { zoneIndex: zi, edgeIndex: i };
+      }
+    }
+  }
+  return null;
+}
+
+function zoneToOpenWallExceptEdge(zone, edgeIndex){
+  // zone pts: [0..n-1], edge = (i -> i+1)
+  const pts = zone.pts || [];
+  const n = pts.length;
+  if(n < 3) return null;
+
+  // 제외할 엣지의 시작점과 끝점
+  const i = edgeIndex;
+  // open polyline은 (i+1)부터 시작해서 i까지 이어붙이기
+  const start = (i + 1) % n;
+
+  let open = [];
+  for(let k=0; k<n; k++){
+    const idx = (start + k) % n;
+    open.push({ x: pts[idx].x, y: pts[idx].y });
+    if (idx === i) break; // i까지 가면 종료
+  }
+
+  // open은 최소 2점 이상이어야 벽선 의미가 있음
+  if(open.length < 2) return null;
+  return open;
+}
+
+function handleClickDelete(){
+  let mx=mouse.x, my=mouse.y, d=30/config.scale;
+
+  // 문
+  for(let i=doors.length-1;i>=0;i--){
+    if(Math.hypot(doors[i].x-mx,doors[i].y-my)<d*2){
+      if(confirm("문 삭제?")){
+        doors.splice(i,1);
+        state.selectedItem=null;
+        draw();
+        return;
+      }
+    }
+  }
+
+  // 가구
+  for(let i=furnitureLines.length-1;i>=0;i--){
+    if(pointToLineDist(mx,my,furnitureLines[i].p1.x,furnitureLines[i].p1.y,furnitureLines[i].p2.x,furnitureLines[i].p2.y)<d){
+      if(confirm("가구 삭제?")){
+        furnitureLines.splice(i,1);
+        state.selectedItem=null;
+        draw();
+        return;
+      }
+    }
+  }
+
+  // ✅ 구역 선(엣지) 삭제 → 구역 해제 + 벽선 변환
+  const hitEdge = findZoneEdgeHit(mx, my, d);
+  if(hitEdge){
+    const z = zones[hitEdge.zoneIndex];
+    if(confirm("구역 선을 삭제하면 구역이 해제되고 벽선으로 변경됩니다.\n진행할까요?")){
+      const openWall = zoneToOpenWallExceptEdge(z, hitEdge.edgeIndex);
+      zones.splice(hitEdge.zoneIndex, 1);
+      if (openWall) freeWalls.push(openWall);
+      draw();
+      return;
+    }
+  }
+
+  // 벽선
+  for(let i=freeWalls.length-1;i>=0;i--){
+    let w=freeWalls[i];
+    for(let j=0;j<w.length-1;j++){
+      if(pointToLineDist(mx,my,w[j].x,w[j].y,w[j+1].x,w[j+1].y)<d){
+        if(confirm("벽선 삭제?")){
+          freeWalls.splice(i,1);
+          draw();
+          return;
+        }
+      }
+    }
+  }
+
+  // (기존: 구역 전체 삭제는 유지할지 애매해서 남겨둠)
+  for(let i=zones.length-1;i>=0;i--){
+    if(isPointInPoly({x:mx,y:my}, zones[i].pts)){
+      if(confirm("구역 삭제?")){
+        zones.splice(i,1);
+        draw();
+        return;
+      }
+    }
+  }
+}
+
+/** =========================
+ * ✅ 키보드 단축키
+ ========================== */
+window.addEventListener('keydown', e=>{
+  if(document.getElementById('inputModal')?.style.display==='block'){
+    if(e.key==='Enter') confirmInput();
+    if(e.key==='Escape') cancelInput();
+    return;
+  }
+  if(document.getElementById('zoneModal')?.classList.contains('show')){
+    if(e.key==='Enter') saveZone();
+    return;
+  }
+
+  let k=e.key.toLowerCase();
+  if(k===' '||(k==='enter'&&points.length>0&&points.length<3)){
+    e.preventDefault(); breakLine(); return;
+  }
+  if(k==='enter'&&points.length>=3){
+    e.preventDefault(); finishZone(); return;
+  }
+  if(k==='z'&&e.ctrlKey){
+    e.preventDefault(); undo(); return;
+  }
+  if(k==='delete'){ setMode('delete'); return; }
+  if(k==='escape'){
+    if(points.length>0) undo(); else setMode('wall');
+    return;
+  }
+  if(k==='o') toggleOrtho();
+  if(k==='s') toggleSnap();
+  if(k==='r') rotateItem();
+  if(k==='f') flipItem();
+
+  // ✅ 선택된 문 폭 변경(키보드: W)
+  if(k==='w'){
+    if(state.selectedItem && state.selectedItem.type==='door'){
+      openDoorSizeModal(state.selectedItem.index);
+    }
+  }
+});
+
+/** =========================
+ * ✅ UI 버튼
+ *  - 선 그리는 중 다른거 눌러도 points 삭제되지 않게 setMode에서 막음
+ ========================== */
+function setMode(m, s){
+  // ✅ 선(또는 가구) 그리고 있을 때 자동 끊기
+  if(points.length > 0 && m !== 'delete'){
+    // 자동으로 끊기 실행
+    if(points.length > 1) freeWalls.push([...points]);
+    points = [];
+    snapTarget = null;
+    mouse.snapped = false;
+    mouse.snapLine = null;
+  }
+
+  mode.current = m;
+  mode.subType = s || '';
+
+  document.querySelectorAll('.tool-btn').forEach(b=>b.classList.remove('active'));
+  if(m==='delete') document.getElementById('btn-delete')?.classList.add('active');
+  else if(m==='wall') document.getElementById('btn-wall')?.classList.add('active');
+  else if(s) document.getElementById('btn-'+s)?.classList.add('active');
+
+  let modeText = m==='delete' ? "지우개" : (m==='wall' ? "벽체" : (s==='closet'?"붙박이":(s==='sink'?"싱크대":"신발장")));
+  const md = document.getElementById('mode-display');
+  if (md) md.innerText = "현재: " + modeText;
+
+  draw();
+}
+
+function toggleOrtho(){
+  config.isOrtho = !config.isOrtho;
+  document.getElementById('btnOrtho')?.classList.toggle('active');
+  draw();
+}
+function toggleSnap(){
+  config.isSmartSnap = !config.isSmartSnap;
+  document.getElementById('btnSnap')?.classList.toggle('active');
+  draw();
+}
+
+function breakLine(){
+  // ✅ 끊기 - 조인 없이 새 선으로 시작
+  if(points.length>1) freeWalls.push([...points]);
+  points=[];
+  snapTarget=null;
+  mouse.snapped=false;
+  mouse.snapLine=null;
+
+  // state.afterBreakLine = true; // ❌ 제거: 끊기 후에는 조인 안 함
+
+  draw();
+}
+
+function undo(){
+  if(points.length>0) {
+    // 그리고 있는 선의 마지막 점 제거
+    points.pop();
+  }
+  else if(freeWalls.length>0) {
+    // 끊긴 벽의 마지막 것 제거
+    freeWalls.pop();
+  }
+  else if(furnitureLines.length>0) {
+    // 가구의 마지막 것 제거
+    furnitureLines.pop();
+  }
+  else if(zones.length>0) {
+    // ✅ 구역을 다시 선으로 복원
+    let lastZone = zones.pop();
+    points = [...lastZone.pts]; // 구역의 점들을 points로 복원
+  }
+  draw();
+}
+
+function closeLoop(){
+  if(points.length<3) return alert('3점 이상 필요합니다');
+  finishZone();
+}
+
+function finishZone(){
+  if(points.length<3) return;
+
+  let a=0, j=points.length-1;
+  for(let i=0;i<points.length;i++){
+    a+=(points[j].x+points[i].x)*(points[j].y-points[i].y);
+    j=i;
+  }
+  a=Math.abs(a/2/1000000).toFixed(2);
+
+  zones.push({pts:[...points], area:a, name:"구역"});
+  points=[];
+  state.afterBreakLine = false; // ✅ 구역완성하면 끊기 플래그 정리
+
+  const areaEl = document.getElementById('modalArea');
+  if(areaEl) areaEl.innerText=a;
+
+  new bootstrap.Modal(document.getElementById('zoneModal')).show();
+  draw();
+}
+
+function getNextZoneLabel(baseName){
+  const limits = { '욕실':3, '방':3, '발코니':3, '베란다':3 };
+  const limit = limits[baseName] ?? 99;
+
+  let usedNums = new Set();
+  zones.forEach(z=>{
+    const n=(z.name||'').trim();
+    if(n===baseName) usedNums.add(1);
+    const m=n.match(new RegExp('^'+baseName+'(\\d+)$'));
+    if(m) usedNums.add(Number(m[1]));
+  });
+
+  for(let i=1;i<=limit;i++){
+    if(!usedNums.has(i)) return i===1 ? baseName : (baseName+i);
+  }
+  return null;
+}
+
+function saveZone(){
+  const sel = document.getElementById('zoneNameSelect');
+  const input = document.getElementById('zoneNameInput');
+
+  let base = sel ? sel.value : '';
+  if(!base) base = (input && input.value.trim()) ? input.value.trim() : '구역';
+
+  let finalName = base;
+
+  if (base === '기타(직접입력)') {
+    finalName = (input && input.value) ? input.value.trim() : '';
+    if(!finalName) finalName = '기타';
+  } else if (base === '욕실' || base === '방' || base === '발코니' || base === '베란다') {
+    const next = getNextZoneLabel(base);
+    if (!next) {
+      alert(`${base}은(는) 최대 3개까지 추가할 수 있습니다.`);
+      zones.pop();
+      bootstrap.Modal.getInstance(document.getElementById('zoneModal')).hide();
+      draw();
+      return;
+    }
+    finalName = next;
+  }
+
+  zones[zones.length-1].name = finalName;
+
+  bootstrap.Modal.getInstance(document.getElementById('zoneModal')).hide();
+
+  if(input) input.value='';
+  if(sel) sel.value='거실';
+
+  draw();
+}
+
+// ✅ 문 추가 (기본 폭 900)
+function addDoor(){
+  let d={
+    x:-config.panX/config.scale + cvs.width/2/config.scale,
+    y:-config.panY/config.scale + cvs.height/2/config.scale,
+    rotation:0,
+    flipped:false,
+    width: 900, // ✅ 문 폭 저장
+    doorType: currentDoorType // ✅ 문 타입 저장
+  };
+  doors.push(d);
+  state.selectedItem={type:'door', index:doors.length-1};
+  draw();
+}
+
+// 문 타입 선택 함수
+function setDoorType(type) {
+  currentDoorType = type;
+  // 버튼 활성화 표시
+  document.querySelectorAll('.door-type-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.querySelector(`[data-door-type="${type}"]`)?.classList.add('active');
+}
+
+function rotateItem(){
+  if(state.selectedItem && state.selectedItem.type==='door'){
+    let d=doors[state.selectedItem.index];
+    d.rotation=(d.rotation+1)%4;
+    draw();
+  }
+}
+function flipItem(){
+  if(state.selectedItem && state.selectedItem.type==='door'){
+    let d=doors[state.selectedItem.index];
+    d.flipped=!d.flipped;
+    draw();
+  }
+}
+
+/** =========================
+ * ✅ 문 치수변경 기능
+ *  - 더블탭/더블클릭(문 위) → 문 폭(mm) 입력 모달
+ *  - 키보드 W (문 선택 상태) → 문 폭 변경
+ ========================== */
+function handleDoubleTap(clientX, clientY){
+  // 좌표 업데이트 후 hit 체크
+  updateMousePosition(clientX, clientY);
+
+  const hit = checkHitItem(mouse.x, mouse.y);
+  if(hit && hit.type === 'door'){
+    state.selectedItem = hit;
+    openDoorSizeModal(hit.index);
+    return;
+  }
+}
+
+function openDoorSizeModal(doorIndex){
+  if (doorIndex == null || !doors[doorIndex]) return;
+  pendingDoorIndex = doorIndex;
+  inputContext.type = 'door';
+  // points는 건드리지 않음 (문 편집은 독립)
+  setTimeout(openInputModal, 30);
+}
+
+/** =========================
+ * ✅ 치수 입력 모달 (벽/가구/문 공용)
+ ========================== */
+function openInputModal(){
+  const inp = document.getElementById('lengthInput');
+  if (!inp) return;
+
+  inp.value = "";
+
+  const title = document.getElementById('inputTitle');
+
+  // --- 문 폭 ---
+  if (inputContext.type === 'door') {
+    const w = Math.round(Number(doors[pendingDoorIndex]?.width) || 900);
+    inp.placeholder = String(w);
+    if (title) title.innerText = '문 폭(mm) 입력';
+    document.getElementById('inputModal').style.display='block';
+    setTimeout(() => inp.focus(), 80);
+    return;
+  }
+
+  // --- 벽/가구는 points 필요 ---
+  if(points.length < 2) return;
+
+  let p1=points[points.length-2], p2=points[points.length-1];
+  let currentLen = Math.round(Math.hypot(p2.x-p1.x, p2.y-p1.y));
+  inp.placeholder = String(currentLen);
+
+  if (title) {
+    title.innerText = (inputContext.type === 'furniture')
+      ? '가구 길이(mm) 입력'
+      : '벽 길이(mm) 입력';
+  }
+
+  document.getElementById('inputModal').style.display='block';
+  setTimeout(() => {
+    inp.focus();
+    if(/iPhone|iPad|iPod/i.test(navigator.userAgent)){
+      inp.scrollIntoView({behavior:'smooth', block:'center'});
+    }
+  }, 100);
+}
+
+function confirmInput(){
+  const raw = document.getElementById('lengthInput').value;
+  let v = Number(raw);
+  if(!v || v <= 0) v = Number(document.getElementById('lengthInput').placeholder) || 0;
+
+  // ✅ 문 폭 적용
+  if (inputContext.type === 'door') {
+    if (pendingDoorIndex != null && doors[pendingDoorIndex]) {
+      doors[pendingDoorIndex].width = Math.max(300, Math.min(2000, Math.round(v || 900)));
+    }
+    pendingDoorIndex = null;
+    document.getElementById('inputModal').style.display='none';
+    draw();
+    return;
+  }
+
+  // ✅ 벽/가구 길이 보정
+  if(points.length>=2 && v>0){
+    let p2=points.pop();
+    let p1=points[points.length-1];
+    let d=Math.hypot(p2.x-p1.x, p2.y-p1.y);
+    if(d > 0) {
+      points.push({
+        x: p1.x + (p2.x-p1.x)/d*v,
+        y: p1.y + (p2.y-p1.y)/d*v
+      });
+    } else {
+      points.push(p2);
+    }
+  }
+
+  document.getElementById('inputModal').style.display='none';
+
+  // ✅ 가구 생성
+  if (inputContext.type === 'furniture' && points.length === 2) {
+    const p1 = points[0];
+    const p2 = points[1];
+    const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+    const t = pendingFurnitureType || mode.subType;
+    const name = (t === 'closet') ? '붙박이장' : (t === 'sink' ? '싱크대' : '신발장');
+
+    furnitureLines.push({ p1, p2, len, type: t, name });
+    points = [];
+    pendingFurnitureType = null;
+    state.afterBreakLine = false;
+  }
+
+  draw();
+}
+
+function cancelInput(){
+  document.getElementById('inputModal').style.display='none';
+
+  if (inputContext.type === 'door') {
+    pendingDoorIndex = null;
+    draw();
+    return;
+  }
+
+  if (inputContext.type === 'furniture') {
+    points = [];
+    pendingFurnitureType = null;
+    state.afterBreakLine = false;
+  }
+  draw();
+}
+
+/** =========================
+ * ✅ 저장
+ ========================== */
+function saveDataToServer(){
+  // ✅ 현장명 필수 체크
+  const siteNameInput = document.getElementById('siteName').value.trim();
+  if (!siteNameInput) {
+    alert('⚠️ 현장명을 입력해주세요!');
+    document.getElementById('siteName').focus();
+    return;
+  }
+
+  let data={
+    siteName: siteNameInput,
+    height: Number(document.getElementById('wallHeight').value) || 2300,
+    zones,
+    freeWalls,
+    furnitureLines,
+    doors
+  };
+
+  if(window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(res => {
+        alert(res);
+        if (typeof goScreen === 'function') goScreen('main');
+      })
+      .withFailureHandler(err => {
+        const msg = (err && err.message) ? err.message : String(err);
+        alert('저장 실패: ' + msg);
+      })
+      .saveToSheet(JSON.stringify(data));
+  } else {
+    console.log('저장할 데이터:', data);
+    alert('테스트 모드: 콘솔에 데이터 출력됨');
+  }
+}
+</script>
