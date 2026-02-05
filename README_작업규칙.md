@@ -167,6 +167,25 @@ AI가 자동으로 다음을 실행합니다:
 
 ---
 
+## 5. 배포 규칙 (버전 20개 제한)
+
+Google Apps Script는 **버전 배포를 최대 20개**까지만 유지할 수 있습니다.
+
+### 사용자가 "배포" 요청 시 진행 순서
+
+1. **`npx clasp push`** → 코드 업로드
+2. **`npx clasp deploy --description "버전 설명"`** → 새 버전 배포 시도
+3. **실패 시** (`Scripts may only have up to 20 versioned deployments`):
+   - **`npx clasp deployments`** 로 목록 확인
+   - **@HEAD 제외** 후 가장 오래된 버전(버전 번호 작은 것) 1~2개 **`npx clasp undeploy <deploymentId>`** 로 삭제
+   - 다시 **`npx clasp deploy`** 실행
+
+### 요약
+
+- **배포 시**: 오래된 버전 배포를 지우고 → 새 버전 올리고 → 배포한다.
+
+---
+
 ## 🔧 문제 해결
 
 ### Git 사용자 정보 오류

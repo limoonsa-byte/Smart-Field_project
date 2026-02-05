@@ -18,7 +18,7 @@ let modalCanvasInteractionInited = false;
 let viewerInteractionInited = false;
 
 // =========================
-// ✅ 리스트 로드
+// ✅ 리스트 로드 (경량 목록 우선 → 첫 화면 빠르게, 도면보관함 없으면 getData 폴백)
 // =========================
 function loadList() {
   const c = document.getElementById('list-container');
@@ -29,23 +29,34 @@ function loadList() {
 
   c.innerHTML = "<div class='text-white text-center mt-5'>로딩중...</div>";
 
-  if (window.google && google.script && google.script.run) {
-    google.script.run
-      .withSuccessHandler(renderList)
-      .withFailureHandler(err => {
-        const msg = (err && err.message) ? err.message : JSON.stringify(err);
-        c.innerHTML = `<div class="text-danger text-center mt-5">불러오기 실패<br><small>${msg}</small></div>`;
-        alert("❌ 도면 불러오기 실패: " + msg);
-      })
-      .getData();
-  } else {
+  if (!window.google || !google.script || !google.script.run) {
     c.innerHTML = "<div class='text-white text-center mt-5'>테스트 모드: 서버 연결 없음</div>";
     if (!document.getElementById('historyModal')) createHistoryDOM();
+    return;
   }
+
+  const fail = (err) => {
+    const msg = (err && err.message) ? err.message : JSON.stringify(err);
+    c.innerHTML = `<div class="text-danger text-center mt-5">불러오기 실패<br><small>${msg}</small></div>`;
+    alert("❌ 도면 불러오기 실패: " + msg);
+  };
+
+  google.script.run
+    .withSuccessHandler(function(lightJson) {
+      let list = [];
+      try { list = JSON.parse(lightJson || '[]'); } catch (e) { list = []; }
+      if (list.length > 0) {
+        renderList(lightJson);
+        return;
+      }
+      google.script.run.withSuccessHandler(renderList).withFailureHandler(fail).getData();
+    })
+    .withFailureHandler(fail)
+    .getDataList();
 }
 
 // =========================
-// ✅ 리스트 렌더
+// ✅ 리스트 렌더 (썸네일은 처음에 로드하지 않음 → 목록만 빠르게 표시)
 // =========================
 function renderList(json) {
   let list = [];
@@ -67,6 +78,7 @@ function renderList(json) {
     return;
   }
 
+  const isLightList = !(list[0] && list[0].zones);
   const row = document.createElement('div');
   row.className = "row g-3";
 
@@ -77,16 +89,15 @@ function renderList(json) {
     const card = document.createElement('div');
     card.className = "card bg-dark text-white border-secondary h-100 shadow-sm";
     card.style.cursor = "pointer";
-    card.onclick = () => openModal(item);
+    card.onclick = () => openModal(item, isLightList);
 
     const date = item.date ? String(item.date).substring(0, 10) : '-';
 
     card.innerHTML = `
-      <div class="card-body p-2 text-center">
-        <canvas id="thumb-${index}" style="width:100%; height:150px; background:#222; border-radius:4px; margin-bottom:10px; border:1px solid #444;"></canvas>
+      <div class="card-body p-3 text-center">
         <h6 class="card-title text-truncate fw-bold mb-1">${item.siteName || 'NoName'}</h6>
-        <p class="card-text text-secondary small mb-0">${date}</p>
-        <button class="btn btn-danger btn-sm mt-2" onclick="event.stopPropagation(); deleteItem('${(item.siteName || 'NoName').replace(/'/g, "\\'")}')">
+        <p class="card-text text-secondary small mb-2">${date}</p>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteItem('${(item.siteName || 'NoName').replace(/'/g, "\\'")}')">
           <i class="bi bi-trash"></i> 삭제
         </button>
       </div>
@@ -94,11 +105,6 @@ function renderList(json) {
 
     col.appendChild(card);
     row.appendChild(col);
-
-    setTimeout(() => {
-      try { drawPreview(item, `thumb-${index}`, true); }
-      catch (e) { console.error(e); }
-    }, 50);
   });
 
   div.appendChild(row);
@@ -107,9 +113,21 @@ function renderList(json) {
 }
 
 // =========================
-// ✅ 모달 열기
+// ✅ 모달 열기 (경량 item이면 먼저 한 건 로드 후 열기)
 // =========================
-function openModal(item) {
+function openModal(item, needFetch) {
+  var shouldFetch = (needFetch === true) || (item && !item.zones && item.siteName);
+  if (shouldFetch && item && item.siteName && window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(function(fullJson) {
+        if (!fullJson) { alert('도면 데이터를 불러오지 못했습니다.'); return; }
+        try { openModal(JSON.parse(fullJson), false); } catch (e) { alert('도면 파싱 실패: ' + e.message); }
+      })
+      .withFailureHandler(function() { alert('도면 불러오기 실패'); })
+      .getDrawingBySiteName(item.siteName);
+    return;
+  }
+
   currentHistoryItem = item;
 
   const t = document.getElementById('modalTitle');
@@ -117,14 +135,12 @@ function openModal(item) {
   if (t) t.innerText = item.siteName || '상세';
   if (d) d.innerText = `날짜: ${item.date || '-'} | 높이: ${item.height || 2300}mm`;
 
-  // 모달 열 때마다 상태 리셋
   modalCanvasState = { scale: 1, pX: 0, pY: 0, isDragging: false, startX: 0, startY: 0 };
 
   new bootstrap.Modal(document.getElementById('historyModal')).show();
 
   setTimeout(() => {
     drawPreview(item, 'modalCanvas', false);
-    // 모달 캔버스 인터랙션 초기화(1회만)
     initModalCanvasInteraction();
   }, 200);
 }
@@ -258,6 +274,21 @@ function drawPreview(data, id, isThumb) {
     });
   }
 
+  // ===== Guide lines =====
+  if (data.guideLines) {
+    ctx.strokeStyle = '#ffc107';
+    ctx.lineWidth = lw;
+    ctx.setLineDash([8 / scale, 6 / scale]);
+    data.guideLines.forEach(wall => {
+      const wPts = wall || [];
+      if (wPts.length < 2) return;
+      ctx.beginPath();
+      wPts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
   // ===== Furniture =====
   if (data.furnitureLines) data.furnitureLines.forEach(f => {
     if (!f?.p1 || !f?.p2) return;
@@ -275,7 +306,7 @@ function drawPreview(data, id, isThumb) {
     label(`${f.name || '가구'} ${mm}`, tx, ty, '#fff', true);
   });
 
-  // ===== Doors (✅ 문 폭 width 반영) =====
+  // ===== Doors (✅ 문 폭 width 반영, 타입별 색상: 방문/현관문/베란다문/중문) =====
   if (data.doors) data.doors.forEach(d => {
     if (d?.x == null || d?.y == null) return;
     ctx.save();
@@ -284,13 +315,18 @@ function drawPreview(data, id, isThumb) {
     if (d.flipped) ctx.scale(1, -1);
 
     const s = Number(d.width) || 900; // ✅ 저장된 문 폭 없으면 900
+    const doorType = d.doorType || 'room';
+    let doorColor = '#dc3545'; // 방문(기본)
+    if (doorType === 'entrance') doorColor = '#198754';   // 현관문: 초록
+    else if (doorType === 'veranda') doorColor = '#0dcaf0'; // 베란다문: 청록
+    else if (doorType === 'middle') doorColor = '#ffc107';  // 중문: 노랑
 
-    ctx.strokeStyle = '#dc3545';
+    ctx.strokeStyle = doorColor;
     ctx.lineWidth = lw;
     ctx.strokeRect(-10 / scale, -s / 2, 20 / scale, s);
     ctx.beginPath(); ctx.arc(0, -s / 2, s, 0, Math.PI / 2, false); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, -s / 2); ctx.lineTo(0, s / 2); ctx.stroke();
-    ctx.fillStyle = '#dc3545';
+    ctx.fillStyle = doorColor;
     ctx.beginPath(); ctx.arc(0, -s / 2, 5 / scale, 0, Math.PI * 2); ctx.fill();
 
     ctx.restore();
@@ -330,6 +366,7 @@ function modalZoomFit() {
   
   if (data.zones) data.zones.forEach(z => z.pts.forEach(p => allPoints.push(p)));
   if (data.freeWalls) data.freeWalls.forEach(w => w.forEach(p => allPoints.push(p)));
+  if (data.guideLines) data.guideLines.forEach(w => w.forEach(p => allPoints.push(p)));
   if (data.furnitureLines) data.furnitureLines.forEach(f => {
     allPoints.push(f.p1);
     allPoints.push(f.p2);
@@ -465,7 +502,10 @@ function initViewer() {
   }, { passive: false });
 
   v.addEventListener('pointerdown', e => {
-    e.preventDefault(); // ✅ NEW
+    // ✅ 버튼(닫기/리셋/줌) 클릭은 막지 않음
+    const target = e.target;
+    if (target && (target.closest('button') || target.tagName === 'BUTTON')) return;
+    e.preventDefault();
     viewerState.isDragging = true;
     viewerState.startX = e.clientX - viewerState.pX;
     viewerState.startY = e.clientY - viewerState.pY;
@@ -598,7 +638,10 @@ function createHistoryDOM() {
             <p class="text-secondary mt-2 mb-0 text-end" id="modalDate"></p>
           </div>
 
-          <div class="modal-footer border-secondary d-flex gap-2">
+          <div class="modal-footer border-secondary d-flex flex-wrap gap-2">
+            <button class="btn btn-primary flex-grow-1 fw-bold py-3" onclick="editDrawingInEditor()">
+              <i class="bi bi-pencil-square"></i> 수정하기
+            </button>
             <button class="btn btn-success flex-grow-1 fw-bold py-3" onclick="openViewer()">
               <i class="bi bi-eye-fill"></i> 이미지 보기
             </button>
@@ -614,7 +657,7 @@ function createHistoryDOM() {
   const v = `
     <div id="fullScreenViewer" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:black;z-index:9999;flex-direction:column;overflow:hidden;">
       <div style="position:absolute;top:16px;left:16px;z-index:10000;display:flex;gap:10px;">
-        <button class="btn btn-light btn-sm fw-bold px-3" onclick="closeViewer()">닫기</button>
+        <button type="button" class="btn btn-light btn-sm fw-bold px-3" onclick="closeViewer()">닫기</button>
         <button class="btn btn-outline-light btn-sm fw-bold px-3" onclick="viewerReset()">리셋</button>
       </div>
 
@@ -642,6 +685,44 @@ function createHistoryDOM() {
   // 생성 직후 1회 init
   setTimeout(() => initModalCanvasInteraction(), 0);
   setTimeout(() => initViewer(), 0);
+}
+
+// =========================
+// ✅ 수정하기: 도면을 그리기 화면에 불러와 편집
+// =========================
+function editDrawingInEditor() {
+  if (!currentHistoryItem) return;
+  var item = currentHistoryItem;
+
+  function doEdit(fullItem) {
+    if (typeof loadDrawingIntoEditor !== 'function') {
+      alert('도면 편집 화면을 사용할 수 없습니다.');
+      return;
+    }
+    loadDrawingIntoEditor(fullItem);
+    var modalEl = document.getElementById('historyModal');
+    if (modalEl && typeof bootstrap !== 'undefined') {
+      var m = bootstrap.Modal.getInstance(modalEl);
+      if (m) m.hide();
+    }
+    if (typeof goScreen === 'function') goScreen('draw');
+  }
+
+  if (item.zones) {
+    doEdit(item);
+    return;
+  }
+  if (!item.siteName || !window.google || !google.script || !google.script.run) {
+    alert('도면 데이터를 불러올 수 없습니다.');
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(fullJson) {
+      if (!fullJson) { alert('도면 데이터를 불러오지 못했습니다.'); return; }
+      try { doEdit(JSON.parse(fullJson)); } catch (e) { alert('도면 파싱 실패: ' + e.message); }
+    })
+    .withFailureHandler(function() { alert('도면 불러오기 실패'); })
+    .getDrawingBySiteName(item.siteName);
 }
 
 // ✅ 삭제 함수

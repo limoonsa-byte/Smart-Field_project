@@ -434,14 +434,11 @@ function analyzeDrawing() {
     addEstimateItem('가설철거', '중문철거', '', '개', middleDoorCount, 0, 50000);
   }
   
-  // 1. 구역별 면적 계산
+  // 1. 구역별 면적 계산 (목공사 1~4번은 치수 직접기입이므로 여기서 추가하지 않음)
   if (currentDrawing.zones) {
     currentDrawing.zones.forEach((zone, idx) => {
       const area = Number(zone.area) || 0;
       const pyeong = area / 3.3;
-      
-      // 천장공사 (m²)
-      addEstimateItem('목공사', '천장공사', '', 'm²', area, 15000, 16000);
       
       // 도배 (평)
       addEstimateItem('도배필름공사', '도배', '', '평', pyeong, 7000, 8000);
@@ -450,39 +447,11 @@ function analyzeDrawing() {
       addEstimateItem('바닥공사', '강마루', '동화 나투스전', '평', pyeong, 98000, 18000);
     });
   }
+
+  // 2. 목공사 5~11번은 calculateItemQuantity에서 도면 방문/중문 개수로 자동 계산됨 (체크 시 수량 반영)
+  //    별도 addEstimateItem 없이 테이블 수량만 도면 기준으로 표시
   
-  // 2. 벽체 길이 계산
-  let totalWallLength = 0;
-  
-  // 구역 둘레
-  if (currentDrawing.zones) {
-    currentDrawing.zones.forEach(z => {
-      if (!z.pts || z.pts.length < 2) return;
-      for (let i = 0; i < z.pts.length; i++) {
-        const p1 = z.pts[i];
-        const p2 = z.pts[(i + 1) % z.pts.length];
-        totalWallLength += Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      }
-    });
-  }
-  
-  // 기타 벽체
-  if (currentDrawing.freeWalls) {
-    currentDrawing.freeWalls.forEach(wall => {
-      if (!wall || wall.length < 2) return;
-      for (let i = 0; i < wall.length - 1; i++) {
-        totalWallLength += Math.hypot(wall[i + 1].x - wall[i].x, wall[i + 1].y - wall[i].y);
-      }
-    });
-  }
-  
-  // 벽체공사 (m²) - 사용자가 양면/단면 선택 필요 (기본: 양면)
-  if (totalWallLength > 0) {
-    const wallArea = (totalWallLength / 1000) * (height / 1000);
-    addEstimateItem('목공사', '양면벽체공사', '', 'm²', wallArea, 17000, 19000);
-  }
-  
-  // 3. 문 개수 (타입별 분류)
+  // 3. 문 개수 (타입별 분류) - 현관문/베란다문/방문+문틀/중문 슬림은 기존처럼 항목 추가
   if (currentDrawing.doors && currentDrawing.doors.length > 0) {
     // 타입별로 분류
     const doorsByType = {
@@ -518,7 +487,7 @@ function analyzeDrawing() {
     
     // 중문
     if (doorsByType.middle > 0) {
-      addEstimateItem('목공사', '중문 슬림 도어', '높이2100', '개', doorsByType.middle, 1200000, 200000);
+      addEstimateItem('목공사', '중문 슬팀 도어', '높이2100', '개', doorsByType.middle, 1200000, 200000);
     }
   }
   
@@ -647,8 +616,318 @@ function calculateItemQuantity(category, priceItem, drawing) {
       return doors.filter(d => (d.doorType || '') === 'veranda').length;
     }
   }
-  
+
+  // 목공사: 1~4 치수 직접기입, 5~9 도면 방문 개수, 10~11 도면 중문, 12~13 직접기입, 16~17 방 둘레 m, 18~20,22~23,26 직접기입, 24 공구손료는 별도 함수
+  if (category === '목공사') {
+    const roomDoorCount = doors.filter(d => (d.doorType || 'room') === 'room').length;
+    const middleDoorCount = doors.filter(d => (d.doorType || '') === 'middle').length;
+
+    if (item === '양면벽체공사' || item === '단면벽체공사' || item === '천장공사' || item === '천장기초 틀대달기') {
+      return 1; // 치수 직접기입
+    }
+    if (item === '문틀시공' || item === '문틀보수' || item === '문짝시공' || item === '문+문틀시공' || item === '문틀모양내기') {
+      return roomDoorCount > 0 ? roomDoorCount : 1;
+    }
+    if (item === '중문 슬팀 도어' || item === '중문슬팀3연동') {
+      return middleDoorCount > 0 ? middleDoorCount : 1;
+    }
+    if (item === '상부장제작' || item === '하부장제작' || item === '우물천장만들기' || item === '단열작업' || item === '보강작업' || item === '벽체 모양내기' || item === '다테일공사' || item === '철물') {
+      return 1; // 직접기입
+    }
+    if (item === '몰딩시공' || item === '걸레받이시공') {
+      let perimeterMm = 0;
+      zones.forEach(z => {
+        const name = (z.name || '').trim();
+        if (name.startsWith('욕실') || name.startsWith('현관') || name.startsWith('발코니') || name.startsWith('베란다')) return;
+        if (!z.pts || z.pts.length < 2) return;
+        for (let i = 0; i < z.pts.length; i++) {
+          const p1 = z.pts[i], p2 = z.pts[(i + 1) % z.pts.length];
+          perimeterMm += Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        }
+      });
+      const perimeterM = perimeterMm / 1000;
+      return perimeterM > 0 ? Math.round(perimeterM * 100) / 100 : 1;
+    }
+    // 공구손료(24번): 수량은 get공구손료Quantity()에서 계산, 여기서는 기본 1
+    if (item === '공구손료') return 1;
+  }
+
+  // 전기공사: 구역 개수·평수·가구 길이 기반 수량
+  if (category === '전기공사') {
+    const name = (n) => (n || '').trim();
+    const entranceCount = zones.filter(z => name(z.name).startsWith('현관')).length;
+    const livingCount = zones.filter(z => name(z.name).startsWith('거실')).length;
+    const roomCount = zones.filter(z => { const n = name(z.name); return n === '방' || /^방\d+$/.test(n); }).length;
+    const anbangCount = zones.filter(z => name(z.name).startsWith('안방')).length;
+    const kitchenCount = zones.filter(z => name(z.name).startsWith('주방')).length;
+    const verandaCount = zones.filter(z => { const n = name(z.name); return n.startsWith('발코니') || n.startsWith('베란다'); }).length;
+    let sinkLengthMm = 0, shoesLengthMm = 0;
+    (furnitureLines || []).forEach(f => {
+      if (!f || !f.p1 || !f.p2) return;
+      const len = Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y);
+      if (f.type === 'sink') sinkLengthMm += len;
+      if (f.type === 'shoes') shoesLengthMm += len;
+    });
+
+    if (item === '전기배선공사(인)') return 4;
+    if (item === '전기배선공사(평)') return Math.ceil(totalPyeong) || 1;
+    if (item === '매입 센서등') return entranceCount || 1;
+    if (item === '센서등') return entranceCount || 1;
+    if (item === '거실등') return livingCount || 1;
+    if (item === '방등') return (roomCount + anbangCount) || 1;
+    if (item === '주방등') return Math.max(1, kitchenCount * 2);
+    if (item === '식탁등') return 1;
+    if (item === '베란다등') return verandaCount || 1;
+    if (item === '거실벽등') return 1;
+    if (item === '3인치 매입등') return (livingCount * 11 + anbangCount * 4 + bathroomCount * 2 + kitchenCount * 8 + (entranceCount >= 1 ? 1 : 0)) || 1;
+    if (item === '매입형 스피커') return 1;
+    if (item === '광정식 감지기') return kitchenCount || 1;
+    if (item === '알산화탄소감지기') return kitchenCount || 1;
+    if (item === '차동식감지기') return (anbangCount + roomCount + livingCount + kitchenCount) || 1;
+    if (item === '스위치') return (livingCount * 5 + kitchenCount * 4 + roomCount * 2 + anbangCount * 3 + bathroomCount * 2) || 1;
+    if (item === '콘센트') return (livingCount * 4 + kitchenCount * 4 + (roomCount + anbangCount) * 2) || 1;
+    if (item === '방우콘센트') return (bathroomCount + verandaCount) || 1;
+    if (item === '전화,인터넷 콘센트') return (kitchenCount + anbangCount + roomCount) || 1;
+    if (item === 'T5') {
+      const sinkLengthM = sinkLengthMm / 1000;
+      return sinkLengthM > 0 ? Math.ceil(sinkLengthM) : 1;
+    }
+    if (item === '싱크대 상부 LED바') {
+      const sinkLengthM = sinkLengthMm / 1000;
+      return sinkLengthM > 0 ? Math.ceil(sinkLengthM) : 1;
+    }
+    if (item === 'T5간접라인') return (Math.ceil(shoesLengthMm / 1200) + bathroomCount) || 1;
+    if (item === '레인스웨이' || item === '레일' || item === '레일등' || item === '벽까기' || item === '실링팬') return 1;
+  }
+
+  // 설비공사: 2번 화장실 방수 = 화장실 바닥 평수 합, 11번 단채움 = 화장실 헤베*0.04, 나머지 직접기입
+  if (category === '설비공사') {
+    const bathroomPyeong = bathroomArea / 3.3;
+    if (item === '화장실 방수') return bathroomPyeong > 0 ? Math.round(bathroomPyeong * 100) / 100 : 1;
+    if (item === '단채움') return bathroomArea > 0 ? Math.round(bathroomArea * 0.04 * 100) / 100 : 1;
+  }
+
+  // 화장실공사: 도면 기반 수량 계산
+  if (category === '화장실공사') {
+    // 1번: 화장실 바닥타일 = 화장실 전체 바닥 면적 합, 소수점 없이 올림
+    if (item === '화장실 바닥타일') {
+      return bathroomArea > 0 ? Math.ceil(bathroomArea) : 1;
+    }
+    
+    // 2번: 화장실 벽체타일 = 화장실 전체 둘레 * 2.1m, 소수점 없이 올림
+    if (item === '화장실 벽체타일') {
+      const wallArea = bathroomPerimeter * 2.1;
+      return wallArea > 0 ? Math.ceil(wallArea) : 1;
+    }
+    
+    // 3번: 매지 = 1인 (고정)
+    if (item === '매지') return 1;
+
+    // 3-1번: 매지 부자재 = 화장실 개수당 2포
+    if (item === '매지 부자재') {
+      return bathroomCount > 0 ? bathroomCount * 2 : 1;
+    }
+    
+    // 4번: 타일부자재 = 1번(바닥) + 2번(벽체) 합산, 소수점 없이 올림
+    if (item === '타일부자재') {
+      const floorArea = bathroomArea > 0 ? Math.ceil(bathroomArea) : 0;
+      const wallArea = bathroomPerimeter * 2.1;
+      const wallRounded = wallArea > 0 ? Math.ceil(wallArea) : 0;
+      const total = floorArea + wallRounded;
+      return total > 0 ? Math.ceil(total) : 1;
+    }
+    
+    // 5-14번: 화장실 개수
+    if (item === '양변기' || item === '세면대' || item === '세면수전' || 
+        item === '욕조샤워수전' || item === '욕실액서사리' || item === '욕조 액서사리' || item === '수건걸이' || 
+        item === '휴지걸이' || item === '트렌치 라인 유가(통)' || item === '라인 유가(사각)' || 
+        item === '청소걸' || item === '해바라기샤워수전') {
+      return bathroomCount > 0 ? bathroomCount : 1;
+    }
+    
+    // 15번: 습진장 = 기본 1
+    if (item === '습진장') return 1;
+    
+    // 16번: 돔천장 = 화장실 개수 (품목명이 "거울장"에서 "돔천장"으로 업데이트 필요)
+    if (item === '거울장' || item === '돔천장') {
+      return bathroomCount > 0 ? bathroomCount : 1;
+    }
+    
+    // 17-18번: 화장실 개수
+    if (item === '간접 타입 욕실거울' || item === '욕조') {
+      return bathroomCount > 0 ? bathroomCount : 1;
+    }
+    
+    // 19-20번: 직접 기입 (욕조조적만, 젠다이만들기는 21번에서 처리)
+    if (item === '욕조조적') return 1;
+    
+    // 21번: 젠다이만들기 = 화장실 개수
+    if (item === '젠다이만들기') {
+      return bathroomCount > 0 ? bathroomCount : 1;
+    }
+    
+    // 22번: 슬리컷시공 = 화장실 바닥 긴쪽 선 길이 M단위
+    if (item === '슬리컷시공') {
+      let maxLengthM = 0;
+      zones.forEach(z => {
+        const name = (z.name || '').trim();
+        if (!name.startsWith('욕실') || !z.pts || z.pts.length < 2) return;
+        // 각 변의 길이 중 최대값 찾기
+        for (let i = 0; i < z.pts.length; i++) {
+          const p1 = z.pts[i];
+          const p2 = z.pts[(i + 1) % z.pts.length];
+          const lenM = Math.hypot(p2.x - p1.x, p2.y - p1.y) / 1000; // mm → m
+          if (lenM > maxLengthM) maxLengthM = lenM;
+        }
+      });
+      return maxLengthM > 0 ? Math.round(maxLengthM * 100) / 100 : 1;
+    }
+    
+    // 23-24번: 화장실 개수
+    if (item === '타일세면대' || item === '휴젠트') {
+      return bathroomCount > 0 ? bathroomCount : 1;
+    }
+    
+    // 25-28번: 힘펠환풍기 = 화장실 개수, 나머지 직접 기입 (가벽, 큐비클, 유리부스, 잡부)
+    if (item === '힘펠천풍기') {
+      return bathroomCount > 0 ? bathroomCount : 1;
+    }
+    if (item === '가벽' || item === '큐비클' || 
+        item === '유리부스' || item === '잡부') return 1;
+  }
+
+  // 도배필름공사: 방/주방/안방/거실 바닥 + 벽체 면적 기반
+  if (category === '도배필름공사') {
+    // 바닥: 전체 - 욕실 - 발코니/베란다 - 현관
+    const flooringArea = totalArea - bathroomArea - verandaArea - entranceArea; // m²
+
+    // 방/주방/안방/거실 둘레 합 (욕실/현관/발코니/베란다 제외)
+    let wallPerimeterMm = 0;
+    zones.forEach(z => {
+      const name = (z.name || '').trim();
+      if (
+        name.startsWith('욕실') ||
+        name.startsWith('현관') ||
+        name.startsWith('발코니') ||
+        name.startsWith('베란다')
+      ) return;
+      if (!z.pts || z.pts.length < 2) return;
+      for (let i = 0; i < z.pts.length; i++) {
+        const p1 = z.pts[i];
+        const p2 = z.pts[(i + 1) % z.pts.length];
+        wallPerimeterMm += Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      }
+    });
+    const wallPerimeterM = wallPerimeterMm / 1000;       // m
+    const wallHeightM = (Number(height) || 2300) / 1000; // m
+    const wallArea = wallPerimeterM * wallHeightM;       // m²
+
+    const totalM2 = Math.max(0, flooringArea) + Math.max(0, wallArea);
+    const totalPyeong = totalM2 / 3.3;
+    const roundedPyeong = totalPyeong > 0 ? Math.round(totalPyeong * 100) / 100 : 1;
+
+    // 1~4번: 동일한 평수 사용
+    if (
+      item === '도배 자재비 - 합지' ||
+      item === '도배 자재비 - 실크' ||
+      item === '도배 자재비 - 디아망' ||
+      item === '도배 부자재'
+    ) {
+      return roundedPyeong;
+    }
+
+    // 5번: 도배 인건비 = 1번 평수 / 15 올림
+    if (item === '도배 인건비') {
+      const base = totalPyeong > 0 ? totalPyeong : 0;
+      const qty = Math.ceil(base / 15);
+      return qty > 0 ? qty : 1;
+    }
+
+    // 6~8번: 필름 자재비/부자재/인건비는 직접 기입
+    return 1;
+  }
+
+  // 바닥공사: 현관/베란다/전체 바닥 면적 기반
+  if (category === '바닥공사') {
+    // m² 기반 면적들
+    const entranceM2 = Math.max(0, entranceArea);
+    const verandaM2 = Math.max(0, verandaArea);
+    const flooringM2 = Math.max(0, totalArea - bathroomArea - verandaArea - entranceArea);
+
+    // 평수 환산 (강마루/장판/데코타일/에디톤/에폭시용)
+    const flooringPyeongRaw = flooringM2 / 3.3;
+    const flooringPyeong = flooringPyeongRaw > 0 ? Math.ceil(flooringPyeongRaw) : 1;
+
+    // 1번: 현관타일 = 현관 바닥 헤베 (m²)
+    if (item === '현관타일') {
+      return entranceM2 > 0 ? Math.ceil(entranceM2) : 1;
+    }
+
+    // 2번: 베란다타일 = 베란다 바닥 면적 (m²)
+    if (item === '베란다타일') {
+      return verandaM2 > 0 ? Math.ceil(verandaM2) : 1;
+    }
+
+    // 4번: 타일부자재 = 현관 + 베란다 면적 (m²)
+    if (item === '타일부자재') {
+      const sum = entranceM2 + verandaM2;
+      return sum > 0 ? Math.ceil(sum) : 1;
+    }
+
+    // 5~9번: 강마루/장판/데코타일/에디톤/에폭시 = 욕실·현관·발코니 제외 전체 면적(평수)
+    if (
+      item === '강마루' ||
+      item === '장판' ||
+      item === '데코타일' ||
+      item === '에디톤' ||
+      item === '에폭시' || // UI 표기
+      item === '애폭시'    // 시트에 따라 있을 수 있는 표기
+    ) {
+      return flooringPyeong;
+    }
+
+    // 나머지 바닥공사 품목은 직접 기입
+    return 1;
+  }
+
   return 1; // 기본값
+}
+
+// =========================
+// ✅ 공구손료 수량: 목공사 체크 항목 노무비 합(공구손료 제외) / 250000 올림
+// =========================
+function get공구손료Quantity() {
+  const laborSum = estimateItems
+    .filter(e => e.category === '목공사' && e.item !== '공구손료')
+    .reduce((sum, e) => sum + (e.qty * (e.laborPrice || 0)), 0);
+  return Math.ceil(laborSum / 250000) || 0;
+}
+
+function sync공구손료Qty() {
+  const gong = estimateItems.find(e => e.category === '목공사' && e.item === '공구손료');
+  if (!gong) return;
+  const q = get공구손료Quantity();
+  gong.qty = q;
+  gong.materialAmount = Math.round(q * gong.materialPrice);
+  gong.laborAmount = Math.round(q * gong.laborPrice);
+  gong.totalAmount = gong.materialAmount + gong.laborAmount;
+}
+
+// 철물 재료비 = 체크된 목공사 항목 재료비 합산 * 0.1 (식 1 유지)
+function get철물재료비Amount() {
+  const sum = estimateItems
+    .filter(e => e.category === '목공사' && e.item !== '철물')
+    .reduce((s, e) => s + (e.qty * (e.materialPrice || 0)), 0);
+  return Math.round(sum * 0.1);
+}
+
+function sync철물Amount() {
+  const chul = estimateItems.find(e => e.category === '목공사' && e.item === '철물');
+  if (!chul) return;
+  const amt = get철물재료비Amount();
+  chul.materialAmount = amt;
+  chul.laborAmount = 0;
+  chul.totalAmount = amt;
 }
 
 // =========================
@@ -866,16 +1145,27 @@ function renderEstimateUI() {
       
       // 수량 계산 (체크 여부와 관계없이 도면 기반으로 계산)
       let calculatedQty = 1; // 기본값
-      if (currentDrawing) {
+      if (category === '목공사' && priceItem.item === '공구손료') {
+        calculatedQty = get공구손료Quantity();
+      } else if (currentDrawing) {
         calculatedQty = calculateItemQuantity(category, priceItem, currentDrawing);
       }
       
-      // 체크된 항목이 있으면 저장된 수량 사용, 없으면 계산된 수량 사용
+      // 체크된 항목이 있으면 저장된 수량 사용, 없으면 계산된 수량 사용 (공구손료는 항상 계산값)
       const isChecked = !!estimateItem;
-      const qty = estimateItem ? estimateItem.qty : calculatedQty;
-      const materialAmt = Math.round(qty * priceItem.materialPrice);
-      const laborAmt = Math.round(qty * priceItem.laborPrice);
-      const totalAmt = materialAmt + laborAmt;
+      const qty = (category === '목공사' && priceItem.item === '공구손료') ? calculatedQty : (estimateItem ? estimateItem.qty : calculatedQty);
+      const is철물Row = (category === '목공사' && priceItem.item === '철물');
+      let materialAmt = Math.round(qty * priceItem.materialPrice);
+      let laborAmt = Math.round(qty * priceItem.laborPrice);
+      let totalAmt = materialAmt + laborAmt;
+      if (is철물Row && isChecked) {
+        totalAmt = get철물재료비Amount();
+        materialAmt = totalAmt;
+        laborAmt = 0;
+      }
+      const is공구손료Row = (category === '목공사' && priceItem.item === '공구손료');
+      const is철물QtyReadonly = (category === '목공사' && priceItem.item === '철물');
+      const qtyReadonlyAttr = is공구손료Row ? 'readonly title="목공사 체크 항목 노무비 합÷25만 자동"' : (is철물QtyReadonly ? 'readonly title="식 1 고정, 재료비=체크된 목공사 재료비 합×10%"' : '');
       
       html += `
         <tr>
@@ -890,9 +1180,10 @@ function renderEstimateUI() {
             <input type="number" class="form-control text-end" 
                    style="min-height: 38px; font-size: 16px;"
                    inputmode="decimal"
-                   value="${qty}" step="0.1" min="0"
+                   value="${is철물QtyReadonly ? 1 : qty}" step="0.1" min="0"
                    onchange="updateEstimateItemQty('${category}', ${itemIdx}, this.value)"
-                   id="qty_${catIdx}_${itemIdx}">
+                   id="qty_${catIdx}_${itemIdx}"
+                   ${qtyReadonlyAttr}>
           </td>
           <td class="text-end small">${priceItem.materialPrice.toLocaleString()}</td>
           <td class="text-end small">${priceItem.laborPrice.toLocaleString()}</td>
@@ -1018,10 +1309,13 @@ function toggleEstimateItem(category, itemIdx, isChecked) {
   const priceItem = priceTables[category][itemIdx];
   
   if (isChecked) {
-    // 견적에 추가 - 기존 표시 수량 유지 (도면 기반 계산값 = 화면에 보이던 수량)
-    const qty = currentDrawing
-      ? calculateItemQuantity(category, priceItem, currentDrawing)
-      : 1;
+    // 견적에 추가 - 공구손료는 목공사 노무비합/25만 올림, 나머지는 도면 기반 또는 1
+    let qty = 1;
+    if (category === '목공사' && priceItem.item === '공구손료') {
+      qty = get공구손료Quantity();
+    } else if (currentDrawing) {
+      qty = calculateItemQuantity(category, priceItem, currentDrawing);
+    }
     addEstimateItem(category, priceItem.item, priceItem.spec, priceItem.unit, qty, priceItem.materialPrice, priceItem.laborPrice);
   } else {
     // 견적에서 제거
@@ -1031,6 +1325,10 @@ function toggleEstimateItem(category, itemIdx, isChecked) {
     if (index >= 0) {
       estimateItems.splice(index, 1);
     }
+  }
+  if (category === '목공사') {
+    sync공구손료Qty();
+    sync철물Amount();
   }
   
   renderEstimateUI();
@@ -1067,10 +1365,19 @@ function updateEstimateItemQty(category, itemIdx, newQty) {
   );
   
   if (item) {
+    // 공구손료/철물은 수량 수동 변경 불가(자동 계산)
+    if (category === '목공사' && (priceItem.item === '공구손료' || priceItem.item === '철물')) {
+      renderEstimateUI();
+      setTimeout(() => window.scrollTo(0, scrollPos), 50);
+      return;
+    }
     item.qty = Math.round(qty * 100) / 100;
     item.materialAmount = Math.round(qty * item.materialPrice);
     item.laborAmount = Math.round(qty * item.laborPrice);
     item.totalAmount = item.materialAmount + item.laborAmount;
+    // 목공사 항목 변경 시 공구손료/철물 동기화
+    sync공구손료Qty();
+    sync철물Amount();
     renderEstimateUI();
     
     // 스크롤 위치 복원

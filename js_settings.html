@@ -301,7 +301,7 @@ function renderItemsManagement() {
                 <th style="width: 80px;">단위</th>
                 <th style="width: 120px;" class="text-end">재료비단가</th>
                 <th style="width: 120px;" class="text-end">노무비단가</th>
-                <th style="width: 150px;" class="text-center">작업</th>
+                <th style="width: 260px;" class="text-center">이동 / 작업</th>
               </tr>
             </thead>
             <tbody>
@@ -357,9 +357,15 @@ function renderItemsManagement() {
                    onchange="updateItemField(${idx}, 'laborPrice', this.value)">
           </td>
           <td class="text-center">
-            <button class="btn btn-sm btn-outline-danger" onclick="deleteItem(${idx})" title="삭제">
-              <i class="bi bi-trash"></i>
-            </button>
+            <button class="btn btn-sm btn-outline-info" onclick="moveItemToTop(${idx})" title="맨 위로" ${idx === 0 ? 'disabled' : ''}><i class="bi bi-arrow-bar-up"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="moveItemUp(${idx})" title="한 칸 위" ${idx === 0 ? 'disabled' : ''}><i class="bi bi-arrow-up"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="moveItemDown(${idx})" title="한 칸 아래" ${idx === items.length - 1 ? 'disabled' : ''}><i class="bi bi-arrow-down"></i></button>
+            <button class="btn btn-sm btn-outline-info" onclick="moveItemToBottom(${idx})" title="맨 아래로" ${idx === items.length - 1 ? 'disabled' : ''}><i class="bi bi-arrow-bar-down"></i></button>
+            <span class="d-inline-block mx-1" style="width:38px">
+              <input type="number" class="form-control form-control-sm text-center p-0" id="moveToNum_${idx}" value="${idx + 1}" min="1" max="${items.length}" style="width:38px;font-size:0.75rem" title="이동할 순서">
+            </span>
+            <button class="btn btn-sm btn-outline-warning" onclick="moveItemToPosition(${idx})" title="입력한 순서로 이동"><i class="bi bi-arrow-right-circle"></i></button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteItem(${idx})" title="삭제"><i class="bi bi-trash"></i></button>
           </td>
         </tr>
       `;
@@ -505,6 +511,63 @@ function saveEditedItem(index) {
   }
   
   // 서버에 저장
+  saveItemsToServer();
+}
+
+// =========================
+// ✅ 품목 위로 이동 (한 칸)
+// =========================
+function moveItemUp(index) {
+  const items = settingsPriceTables[currentCategory];
+  if (!items || index <= 0 || index >= items.length) return;
+  const temp = items[index];
+  items[index] = items[index - 1];
+  items[index - 1] = temp;
+  saveItemsToServer();
+}
+
+// =========================
+// ✅ 품목 아래로 이동 (한 칸)
+// =========================
+function moveItemDown(index) {
+  const items = settingsPriceTables[currentCategory];
+  if (!items || index < 0 || index >= items.length - 1) return;
+  const temp = items[index];
+  items[index] = items[index + 1];
+  items[index + 1] = temp;
+  saveItemsToServer();
+}
+
+// =========================
+// ✅ 품목 맨 위로 / 맨 아래로
+// =========================
+function moveItemToTop(index) {
+  const items = settingsPriceTables[currentCategory];
+  if (!items || index <= 0 || index >= items.length) return;
+  const one = items.splice(index, 1)[0];
+  items.unshift(one);
+  saveItemsToServer();
+}
+
+function moveItemToBottom(index) {
+  const items = settingsPriceTables[currentCategory];
+  if (!items || index < 0 || index >= items.length - 1) return;
+  const one = items.splice(index, 1)[0];
+  items.push(one);
+  saveItemsToServer();
+}
+
+// =========================
+// ✅ 품목 지정 순서로 이동 (1부터 시작)
+// =========================
+function moveItemToPosition(index) {
+  const items = settingsPriceTables[currentCategory];
+  if (!items || index < 0 || index >= items.length) return;
+  const inputEl = document.getElementById('moveToNum_' + index);
+  const target = (inputEl ? parseInt(inputEl.value, 10) : 0) - 1; // 1-based → 0-based
+  if (!Number.isInteger(target) || target < 0 || target >= items.length || target === index) return;
+  const one = items.splice(index, 1)[0];
+  items.splice(target, 0, one);
   saveItemsToServer();
 }
 

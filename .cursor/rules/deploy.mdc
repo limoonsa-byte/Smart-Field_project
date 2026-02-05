@@ -1,0 +1,19 @@
+---
+description: Apps Script 배포 시 버전 20개 제한 대응
+globs: 
+alwaysApply: false
+---
+
+# 배포 규칙 (clasp)
+
+사용자가 **"배포"** 요청 시 다음 순서로 진행한다.
+
+1. **`npx clasp push`** 실행 (프로젝트 루트, working_directory 지정)
+2. **`npx clasp deploy --description "간단한 설명"`** 실행
+3. **실패 시** 출력에 `Scripts may only have up to 20 versioned deployments` 가 있으면:
+   - **`npx clasp deployments`** 로 배포 목록 확인
+   - **@HEAD 가 아닌** 버전 배포 중 **가장 오래된 것(버전 번호 작은 것)** 1~2개의 deployment ID를 복사
+   - **`npx clasp undeploy <deploymentId>`** 로 해당 배포 삭제 (1개 이상)
+   - 다시 **`npx clasp deploy --description "..."`** 실행
+
+요약: **버전 배포 20개 제한**에 걸리면 **오래된 버전을 지운 뒤** 새 버전을 배포한다.

@@ -4,7 +4,7 @@ const ctx = cvs.getContext('2d');
 const wrapper = document.getElementById('canvas-wrapper');
 
 // 데이터
-let points = [], zones = [], freeWalls = [], furnitureLines = [], doors = [];
+let points = [], zones = [], freeWalls = [], guideLines = [], furnitureLines = [], doors = [];
 
 // 문 타입 정의
 const DOOR_TYPES = {
@@ -68,6 +68,7 @@ function zoomFit(){
   
   points.forEach(p => allPoints.push(p));
   freeWalls.forEach(w => w.forEach(p => allPoints.push(p)));
+  guideLines.forEach(w => w.forEach(p => allPoints.push(p)));
   zones.forEach(z => z.pts.forEach(p => allPoints.push(p)));
   furnitureLines.forEach(f => {
     allPoints.push(f.p1);
@@ -230,6 +231,19 @@ function draw(){
     for(let i=0; i<w.length-1; i++) dim(w[i], w[i+1]);
   });
 
+  // 가이드선 (벽선과 별도, 지우개로만 삭제) + 치수
+  guideLines.forEach(w=>{
+    ctx.beginPath();
+    w.forEach((p,i)=> i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+    ctx.strokeStyle='#ffc107';
+    ctx.lineWidth=2/config.scale;
+    ctx.setLineDash([8/config.scale, 6/config.scale]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    point(w[0],'#ffc107'); point(w[w.length-1],'#ffc107');
+    for(let i=0; i<w.length-1; i++) dim(w[i], w[i+1], false, '#ffc107');
+  });
+
   // 가구
   function fmtLen(mm){ return String(Math.round(Number(mm) || 0)); }
 
@@ -301,7 +315,8 @@ function draw(){
     ctx.strokeRect(-10/config.scale, -s/2, 20/config.scale, s);
     ctx.beginPath(); ctx.moveTo(0,-s/2); ctx.arc(0,-s/2,s,0,Math.PI/2,false); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0,-s/2); ctx.lineTo(0,s/2); ctx.stroke();
-    ctx.fillStyle='#dc3545'; ctx.beginPath(); ctx.arc(0,-s/2,5/config.scale,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = doorColor;
+    ctx.beginPath(); ctx.arc(0,-s/2,5/config.scale,0,Math.PI*2); ctx.fill();
 
     // ✅ 선택된 문이면 폭 텍스트 표시(숫자만)
     if(state.selectedItem && state.selectedItem.type==='door' && state.selectedItem.index===i){
@@ -313,19 +328,22 @@ function draw(){
 
   // 그리는 중 선
   if(points.length>0){
+    let strokeCol = mode.current==='wall' ? '#0f0' : (mode.current==='guide' ? '#ffc107' : '#0ff');
     ctx.beginPath();
-    ctx.strokeStyle = mode.current==='wall' ? '#0f0' : '#0ff';
+    ctx.strokeStyle = strokeCol;
     ctx.lineWidth = 2/config.scale;
+    if (mode.current === 'guide') ctx.setLineDash([8/config.scale, 6/config.scale]);
     ctx.moveTo(points[0].x, points[0].y);
     points.forEach(p=>ctx.lineTo(p.x,p.y));
     ctx.lineTo(mouse.x,mouse.y);
     ctx.stroke();
+    ctx.setLineDash([]);
 
     dim(points[points.length-1], mouse, true);
 
     if(config.isOrtho){
       ctx.beginPath();
-      ctx.strokeStyle='rgba(0,255,0,0.5)';
+      ctx.strokeStyle = mode.current==='guide' ? 'rgba(255,193,7,0.5)' : 'rgba(0,255,0,0.5)';
       ctx.setLineDash([5/config.scale,5/config.scale]);
       ctx.moveTo(points[points.length-1].x, points[points.length-1].y);
       ctx.lineTo(mouse.x,mouse.y);
@@ -334,8 +352,8 @@ function draw(){
     }
   }
 
-  // ✅ 스냅 가능한 점들 미리 표시 (벽체 그리기 중일 때만)
-  if (mode.current === 'wall' && config.isSmartSnap) {
+  // ✅ 스냅 가능한 점들 미리 표시 (벽체/가이드선 그리기 중일 때)
+  if ((mode.current === 'wall' || mode.current === 'guide') && config.isSmartSnap) {
     let snapRadius = config.snapDist / config.scale;
     let mx = mouse.rawX, my = mouse.rawY;
     
@@ -644,8 +662,8 @@ function handlePointerDown(cx, cy, button=0){
 
     // (2) 끊기 이후 조인 강제: 시작점(첫 점)에서도 wallEnd면 흡수
     //     - 평소에는 “첫 점에서 흡수” 막지만, 끊기 직후만 허용
-    // ✅ 첫 점이든 두 번째 점이든 wallEnd에 스냅되면 조인
-    if (snapTarget.type === 'wallEnd' && points.length >= 1) {
+    // ✅ 첫 점이든 두 번째 점이든 wallEnd에 스냅되면 조인 (가이드선은 벽 흡수 안 함)
+    if (snapTarget.type === 'wallEnd' && points.length >= 1 && mode.current !== 'guide') {
       let other = freeWalls[snapTarget.index];
       
       // ✅ 첫 점일 때: 벽을 앞에, head면 뒤집기
@@ -682,6 +700,14 @@ function handlePointerDown(cx, cy, button=0){
   if (mode.current === 'furniture' && points.length === 2) {
     inputContext.type = 'furniture';
     pendingFurnitureType = mode.subType;
+    setTimeout(openInputModal, 50);
+    draw();
+    return;
+  }
+
+  // ✅ 가이드선: 2점 이상이면 치수(길이) 입력
+  if (mode.current === 'guide' && points.length > 1 && !snapTarget) {
+    inputContext.type = 'guide';
     setTimeout(openInputModal, 50);
     draw();
     return;
@@ -758,6 +784,10 @@ function calculateSnap(){
     targets.push({ x:w[0].x, y:w[0].y, type:'wallEnd', index:i, end:'head' });
     targets.push({ x:w[w.length-1].x, y:w[w.length-1].y, type:'wallEnd', index:i, end:'tail' });
   });
+  guideLines.forEach((w, i) => {
+    targets.push({ x:w[0].x, y:w[0].y, type:'guideEnd', index:i, end:'head' });
+    targets.push({ x:w[w.length-1].x, y:w[w.length-1].y, type:'guideEnd', index:i, end:'tail' });
+  });
 
   if (points.length > 0) targets.push({ x:points[0].x, y:points[0].y, type:'start' });
 
@@ -775,7 +805,7 @@ function calculateSnap(){
     if (Math.hypot(t.x - rx, t.y - ry) < md) {
       tx=t.x; ty=t.y;
       mouse.snapped=true;
-      if (t.type === 'wallEnd' || t.type === 'start') snapTarget = t;
+      if (t.type === 'wallEnd' || t.type === 'start' || t.type === 'guideEnd') snapTarget = t;
       break;
     }
   }
@@ -902,6 +932,20 @@ function handleClickDelete(){
     }
   }
 
+  // 가이드선 (벽선과 별도로 지우개로 삭제)
+  for(let i=guideLines.length-1;i>=0;i--){
+    let w=guideLines[i];
+    for(let j=0;j<w.length-1;j++){
+      if(pointToLineDist(mx,my,w[j].x,w[j].y,w[j+1].x,w[j+1].y)<d){
+        if(confirm("가이드선 삭제?")){
+          guideLines.splice(i,1);
+          draw();
+          return;
+        }
+      }
+    }
+  }
+
   // ✅ 구역 선(엣지) 삭제 → 구역 해제 + 벽선 변환
   const hitEdge = findZoneEdgeHit(mx, my, d);
   if(hitEdge){
@@ -945,6 +989,21 @@ function handleClickDelete(){
  * ✅ 키보드 단축키
  ========================== */
 window.addEventListener('keydown', e=>{
+  // ✅ 치수 입력 모달이 열려 있으면 Enter=확인, Esc=취소 (모든 치수 입력에 공통)
+  if(document.getElementById('inputModal')?.style.display==='block'){
+    if(e.key==='Enter'){
+      e.preventDefault();
+      confirmInput();
+      return;
+    }
+    if(e.key==='Escape'){
+      e.preventDefault();
+      cancelInput();
+      return;
+    }
+    return;
+  }
+
   // ✅ 입력 필드에 포커스가 있으면 키보드 이벤트 무시 (스페이스바 등 정상 작동)
   const activeElement = document.activeElement;
   if (activeElement && (
@@ -953,12 +1012,6 @@ window.addEventListener('keydown', e=>{
     activeElement.isContentEditable
   )) {
     return; // 입력 필드에서는 키보드 단축키 작동 안 함
-  }
-  
-  if(document.getElementById('inputModal')?.style.display==='block'){
-    if(e.key==='Enter') confirmInput();
-    if(e.key==='Escape') cancelInput();
-    return;
   }
   if(document.getElementById('zoneModal')?.classList.contains('show')){
     if(e.key==='Enter') saveZone();
@@ -969,8 +1022,11 @@ window.addEventListener('keydown', e=>{
   if(k===' '||(k==='enter'&&points.length>0&&points.length<3)){
     e.preventDefault(); breakLine(); return;
   }
-  if(k==='enter'&&points.length>=3){
+  if(k==='enter'&&points.length>=3&&mode.current!=='guide'){
     e.preventDefault(); finishZone(); return;
+  }
+  if(k==='enter'&&mode.current==='guide'&&points.length>=2){
+    e.preventDefault(); finishGuide(); return;
   }
   if(k==='z'&&e.ctrlKey){
     e.preventDefault(); undo(); return;
@@ -998,10 +1054,12 @@ window.addEventListener('keydown', e=>{
  *  - 선 그리는 중 다른거 눌러도 points 삭제되지 않게 setMode에서 막음
  ========================== */
 function setMode(m, s){
-  // ✅ 선(또는 가구) 그리고 있을 때 자동 끊기
+  // ✅ 선(또는 가구/가이드선) 그리고 있을 때 자동 끊기
   if(points.length > 0 && m !== 'delete'){
-    // 자동으로 끊기 실행
-    if(points.length > 1) freeWalls.push([...points]);
+    if(points.length > 1) {
+      if (mode.current === 'guide') guideLines.push([...points]);
+      else freeWalls.push([...points]);
+    }
     points = [];
     snapTarget = null;
     mouse.snapped = false;
@@ -1014,9 +1072,14 @@ function setMode(m, s){
   document.querySelectorAll('.tool-btn').forEach(b=>b.classList.remove('active'));
   if(m==='delete') document.getElementById('btn-delete')?.classList.add('active');
   else if(m==='wall') document.getElementById('btn-wall')?.classList.add('active');
+  else if(m==='guide') document.getElementById('btn-guide')?.classList.add('active');
   else if(s) document.getElementById('btn-'+s)?.classList.add('active');
 
-  let modeText = m==='delete' ? "지우개" : (m==='wall' ? "벽체" : (s==='closet'?"붙박이":(s==='sink'?"싱크대":"신발장")));
+  // 가이드선 모드 진입 시 직교 켜기
+  if (m === 'guide') config.isOrtho = true;
+  document.getElementById('btnOrtho')?.classList.toggle('active', config.isOrtho);
+
+  let modeText = m==='delete' ? "지우개" : (m==='wall' ? "벽체" : (m==='guide' ? "가이드선" : (s==='closet'?"붙박이":(s==='sink'?"싱크대":"신발장"))));
   const md = document.getElementById('mode-display');
   if (md) md.innerText = "현재: " + modeText;
 
@@ -1036,14 +1099,25 @@ function toggleSnap(){
 
 function breakLine(){
   // ✅ 끊기 - 조인 없이 새 선으로 시작
-  if(points.length>1) freeWalls.push([...points]);
+  if(points.length>1) {
+    if (mode.current === 'guide') guideLines.push([...points]);
+    else freeWalls.push([...points]);
+  }
   points=[];
   snapTarget=null;
   mouse.snapped=false;
   mouse.snapLine=null;
 
-  // state.afterBreakLine = true; // ❌ 제거: 끊기 후에는 조인 안 함
+  draw();
+}
 
+function finishGuide(){
+  if (points.length < 2) return;
+  guideLines.push([...points]);
+  points = [];
+  snapTarget = null;
+  mouse.snapped = false;
+  mouse.snapLine = null;
   draw();
 }
 
@@ -1051,6 +1125,9 @@ function undo(){
   if(points.length>0) {
     // 그리고 있는 선의 마지막 점 제거
     points.pop();
+  }
+  else if(mode.current==='guide'&&guideLines.length>0) {
+    guideLines.pop();
   }
   else if(freeWalls.length>0) {
     // 끊긴 벽의 마지막 것 제거
@@ -1095,7 +1172,7 @@ function finishZone(){
 }
 
 function getNextZoneLabel(baseName){
-  const limits = { '욕실':3, '방':3, '발코니':3, '베란다':3 };
+  const limits = { '욕실':9, '방':9, '발코니':9, '베란다':9 };
   const limit = limits[baseName] ?? 99;
 
   let usedNums = new Set();
@@ -1127,7 +1204,7 @@ function saveZone(){
   } else if (base === '욕실' || base === '방' || base === '발코니' || base === '베란다') {
     const next = getNextZoneLabel(base);
     if (!next) {
-      alert(`${base}은(는) 최대 3개까지 추가할 수 있습니다.`);
+      alert(`${base}은(는) 최대 9개까지 추가할 수 있습니다.`);
       zones.pop();
       bootstrap.Modal.getInstance(document.getElementById('zoneModal')).hide();
       draw();
@@ -1240,9 +1317,9 @@ function openInputModal(){
   inp.placeholder = String(currentLen);
 
   if (title) {
-    title.innerText = (inputContext.type === 'furniture')
-      ? '가구 길이(mm) 입력'
-      : '벽 길이(mm) 입력';
+    if (inputContext.type === 'furniture') title.innerText = '가구 길이(mm) 입력';
+    else if (inputContext.type === 'guide') title.innerText = '가이드선 길이(mm) 입력';
+    else title.innerText = '벽 길이(mm) 입력';
   }
 
   document.getElementById('inputModal').style.display='block';
@@ -1323,6 +1400,28 @@ function cancelInput(){
 }
 
 /** =========================
+ * ✅ 보관함에서 도면 불러와 수정 (외부 호출: js_history 모달에서 사용)
+ * - data: { siteName, height, zones, freeWalls, guideLines, furnitureLines, doors }
+ ========================== */
+function loadDrawingIntoEditor(data) {
+  if (!data) return;
+  points = [];
+  zones = (data.zones && Array.isArray(data.zones)) ? JSON.parse(JSON.stringify(data.zones)) : [];
+  freeWalls = (data.freeWalls && Array.isArray(data.freeWalls)) ? JSON.parse(JSON.stringify(data.freeWalls)) : [];
+  guideLines = (data.guideLines && Array.isArray(data.guideLines)) ? JSON.parse(JSON.stringify(data.guideLines)) : [];
+  furnitureLines = (data.furnitureLines && Array.isArray(data.furnitureLines)) ? JSON.parse(JSON.stringify(data.furnitureLines)) : [];
+  doors = (data.doors && Array.isArray(data.doors)) ? JSON.parse(JSON.stringify(data.doors)) : [];
+
+  const siteEl = document.getElementById('siteName');
+  const heightEl = document.getElementById('wallHeight');
+  if (siteEl) siteEl.value = String(data.siteName || '').trim();
+  if (heightEl) heightEl.value = String(data.height || 2300);
+
+  draw();
+  if (typeof zoomFit === 'function') zoomFit();
+}
+
+/** =========================
  * ✅ 저장
  ========================== */
 function saveDataToServer(){
@@ -1339,6 +1438,7 @@ function saveDataToServer(){
     height: Number(document.getElementById('wallHeight').value) || 2300,
     zones,
     freeWalls,
+    guideLines,
     furnitureLines,
     doors
   };

@@ -48,8 +48,11 @@ function formatNowKST_() {
   return Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
 }
 
+/** 도면 보관함 시트 이름 (한 시트에서 모두 관리) */
+const DRAWING_SHEET_NAME = '도면보관함';
+
 /**
- * ✅ 저장: 현장 이름으로 탭(시트)을 만들어 저장 (동시성/안전)
+ * ✅ 저장: "도면보관함" 시트 하나에 행으로 추가 (한 시트에서 모두 관리)
  * - data는 문자열(JSON)로 들어옴
  */
 function saveToSheet(data) {
@@ -60,36 +63,18 @@ function saveToSheet(data) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const jsonData = JSON.parse(data);
 
-    const rawSiteName = String(jsonData.siteName || '').trim(); // 원본 이름
-    const baseName = sanitizeSheetName_(rawSiteName);
-    let sheet = ss.getSheetByName(baseName);
+    const rawSiteName = String(jsonData.siteName || '').trim();
+    let sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
 
-    // ✅ 시트 없으면 생성 + 헤더
     if (!sheet) {
-      const uniqueName = getUniqueSheetName_(ss, baseName);
-      sheet = ss.insertSheet(uniqueName, ss.getNumSheets());
+      sheet = ss.insertSheet(DRAWING_SHEET_NAME, ss.getNumSheets());
       sheet.appendRow(["저장시각", "현장명", "천장고", "요약", "데이터(JSON)"]);
-      for (let c = 1; c <= sheet.getMaxColumns(); c++) { sheet.setColumnWidth(c, 150); }
-    } else {
-      // ✅ 기존 시트가 있는데, 현장명이 다른 케이스(정제 과정에서 충돌)면 분리
-      //    - 기존 시트의 2행 현장명(첫 저장)을 보고 판단
-      try {
-        const firstNameCell = sheet.getRange(2, 2).getValue(); // B2 = 현장명
-        const firstName = String(firstNameCell || '').trim();
-        if (firstName && rawSiteName && firstName !== rawSiteName) {
-          const uniqueName = getUniqueSheetName_(ss, baseName);
-          sheet = ss.insertSheet(uniqueName, ss.getNumSheets());
-          sheet.appendRow(["저장시각", "현장명", "천장고", "요약", "데이터(JSON)"]);
-          for (let c = 1; c <= sheet.getMaxColumns(); c++) { sheet.setColumnWidth(c, 150); }
-        }
-      } catch (e) {
-        // 판단 실패해도 그냥 기존 시트 사용
-      }
+      sheet.getRange(1, 1, 1, 5).setBackground('#1a1a1a').setFontColor('#fff').setFontWeight('bold');
+      for (let c = 1; c <= 5; c++) sheet.setColumnWidth(c, 150);
     }
-
-    // (혹시) 시트는 있는데 비어있으면 헤더
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(["저장시각", "현장명", "천장고", "요약", "데이터(JSON)"]);
+      sheet.getRange(1, 1, 1, 5).setBackground('#1a1a1a').setFontColor('#fff').setFontWeight('bold');
     }
 
     const ts = formatNowKST_();
@@ -99,20 +84,17 @@ function saveToSheet(data) {
     const wallsCount = jsonData.freeWalls ? jsonData.freeWalls.length : 0;
     const furnCount  = jsonData.furnitureLines ? jsonData.furnitureLines.length : 0;
     const doorsCount = jsonData.doors ? jsonData.doors.length : 0;
-
     const summary = `구역 ${zonesCount} / 벽선 ${wallsCount} / 가구 ${furnCount} / 문 ${doorsCount}`;
     const payload = JSON.stringify(jsonData);
 
-    // 셀 문자열 제한(약 50k) 근접 방지
     if (payload.length > 45000) {
       return `❌ 저장 실패: 도면 데이터가 너무 큽니다(JSON ${payload.length}자).
 - 구역:${zonesCount} 벽선:${wallsCount} 가구:${furnCount} 문:${doorsCount}
 - 팁: 구역/벽선 개수를 줄이거나 저장 방식을 분리해야 합니다.`;
     }
 
-    // ✅ 저장 (현장명은 원본 그대로 저장)
-    sheet.appendRow([ts, rawSiteName || baseName, jsonData.height || '', summary, payload]);
-    return `✅ '${sheet.getName()}' 시트에 저장되었습니다!`;
+    sheet.appendRow([ts, rawSiteName, jsonData.height || '', summary, payload]);
+    return `✅ 도면보관함에 저장되었습니다!`;
   } catch (e) {
     return "❌ 오류: " + e.toString();
   } finally {
@@ -121,42 +103,140 @@ function saveToSheet(data) {
 }
 
 /**
- * ✅ 불러오기: 각 시트의 "최신 1건"만 모아서 반환 + 최신순 정렬
- * - 프론트(js_history)가 JSON 문자열을 기대함
+ * ✅ 경량 목록: "도면보관함"에서 컬럼 1~4(저장시각, 현장명, 천장고, 요약)만 읽어 반환. JSON 컬럼 제외로 첫 로딩 전송량 대폭 감소.
+ * - 도면보관함이 없거나 비어 있으면 [] 반환 (프론트에서 getData() 폴백 가능).
+ */
+function getDataList() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return '[]';
+
+    const lastRow = sheet.getLastRow();
+    const rows = sheet.getRange(2, 1, lastRow, 4).getValues();
+    const bySite = {};
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const dVal = row[0];
+      const siteName = String(row[1] || '').trim();
+      const height = row[2];
+      const summary = String(row[3] || '').trim();
+      const dateStr = (dVal instanceof Date)
+        ? Utilities.formatDate(dVal, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss')
+        : String(dVal || '');
+      if (!siteName) continue;
+      if (!bySite[siteName] || dateStr > String(bySite[siteName].date)) {
+        bySite[siteName] = { date: dateStr, siteName: siteName, height: height, summary: summary };
+      }
+    }
+    const list = Object.keys(bySite).map(function(k) { return bySite[k]; });
+    list.sort(function(a, b) { return String(b.date || '').localeCompare(String(a.date || '')); });
+    return JSON.stringify(list);
+  } catch (e) {
+    return '[]';
+  }
+}
+
+/**
+ * ✅ 한 건 로드: 현장명으로 해당 도면 전체 JSON만 가져오기 (썸네일/모달용).
+ * - 도면보관함에 없으면 null 반환.
+ */
+function getDrawingBySiteName(siteName) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return null;
+
+    const rawName = String(siteName || '').trim();
+    if (!rawName) return null;
+
+    const lastRow = sheet.getLastRow();
+    const rows = sheet.getRange(2, 1, lastRow, 5).getValues();
+    let best = null;
+    let bestDate = '';
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const sn = String(row[1] || '').trim();
+      if (sn !== rawName) continue;
+      const dVal = row[0];
+      const jsonStr = row[4];
+      if (typeof jsonStr !== 'string' || !jsonStr.trim()) continue;
+      const dateStr = (dVal instanceof Date)
+        ? Utilities.formatDate(dVal, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss')
+        : String(dVal || '');
+      if (dateStr > bestDate) {
+        try {
+          const item = JSON.parse(jsonStr);
+          item.date = dateStr;
+          best = item;
+          bestDate = dateStr;
+        } catch (e) {}
+      }
+    }
+    return best ? JSON.stringify(best) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * ✅ 불러오기: "도면보관함" 시트만 있으면 그 시트만 읽어서 반환 (API 1회). 없으면 예전 현장별 시트 순회.
  */
 function getData() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheets = ss.getSheets();
-    const list = [];
+    const bySite = {};
+    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
 
-    for (let i = 0; i < sheets.length; i++) {
-      const sheet = sheets[i];
+    if (sheet && sheet.getLastRow() >= 2) {
       const lastRow = sheet.getLastRow();
-      if (lastRow < 2) continue;
-
-      // A~E(5칸) : 저장시각, 현장명, 천장고, 요약, JSON
-      const row = sheet.getRange(lastRow, 1, 1, 5).getValues()[0];
-      const dVal = row[0];
-      const jsonStr = row[4];
-
-      if (typeof jsonStr === 'string' && jsonStr.trim()) {
+      const rows = sheet.getRange(2, 1, lastRow, 5).getValues();
+      for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        const dVal = row[0];
+        const siteName = String(row[1] || '').trim();
+        const jsonStr = row[4];
+        if (typeof jsonStr !== 'string' || !jsonStr.trim()) continue;
         try {
           const item = JSON.parse(jsonStr);
-
           item.date = (dVal instanceof Date)
             ? Utilities.formatDate(dVal, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss')
             : String(dVal || '');
-
-          list.push(item);
-        } catch (e) {
-          // JSON 파싱 실패면 스킵
-        }
+          if (!bySite[siteName] || String(item.date) > String(bySite[siteName].date)) {
+            bySite[siteName] = item;
+          }
+        } catch (e) {}
       }
+      const list = Object.keys(bySite).map(function(k) { return bySite[k]; });
+      list.sort(function(a, b) { return String(b.date || '').localeCompare(String(a.date || '')); });
+      return JSON.stringify(list);
     }
 
-    // 최신순
-    list.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    // 도면보관함 없거나 비어 있음: 예전 방식(현장별 시트)으로 읽기
+    const sheets = ss.getSheets();
+    for (let i = 0; i < sheets.length; i++) {
+      const s = sheets[i];
+      const name = s.getName();
+      if (name.indexOf('(품목)') !== -1 || name.indexOf('견적_') === 0) continue;
+      const lastRow = s.getLastRow();
+      if (lastRow < 2) continue;
+      const row = s.getRange(lastRow, 1, 1, 5).getValues()[0];
+      const dVal = row[0];
+      const jsonStr = row[4];
+      if (typeof jsonStr !== 'string' || !jsonStr.trim()) continue;
+      try {
+        const item = JSON.parse(jsonStr);
+        const siteName = String(item.siteName || row[1] || '').trim();
+        item.date = (dVal instanceof Date)
+          ? Utilities.formatDate(dVal, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss')
+          : String(dVal || '');
+        if (!bySite[siteName] || String(item.date) > String(bySite[siteName].date)) {
+          bySite[siteName] = item;
+        }
+      } catch (e) {}
+    }
+    const list = Object.keys(bySite).map(function(k) { return bySite[k]; });
+    list.sort(function(a, b) { return String(b.date || '').localeCompare(String(a.date || '')); });
     return JSON.stringify(list);
   } catch (e) {
     return "[]";
@@ -164,7 +244,8 @@ function getData() {
 }
 
 /**
- * ✅ 삭제: 현장명으로 시트 찾아서 마지막 행 삭제
+ * ✅ 삭제: "도면보관함" 시트에서 해당 현장의 최신 저장 행 1개 삭제
+ * - "도면보관함" 없으면 예전 방식(현장별 시트 마지막 행 삭제)으로 처리
  */
 function deleteFromSheet(siteName) {
   const lock = LockService.getScriptLock();
@@ -172,28 +253,38 @@ function deleteFromSheet(siteName) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const baseName = sanitizeSheetName_(siteName);
-    const sheet = ss.getSheetByName(baseName);
+    const rawName = String(siteName || '').trim();
+    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
 
-    if (!sheet) {
-      return `❌ '${baseName}' 시트를 찾을 수 없습니다.`;
+    if (sheet && sheet.getLastRow() >= 2) {
+      const lastRow = sheet.getLastRow();
+      const rows = sheet.getRange(2, 1, lastRow, 2).getValues();
+      let deleteRowIndex = -1;
+      let latestDate = '';
+      for (let r = 0; r < rows.length; r++) {
+        if (String(rows[r][1] || '').trim() !== rawName) continue;
+        const d = rows[r][0];
+        const dateStr = d instanceof Date ? Utilities.formatDate(d, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : String(d || '');
+        if (dateStr > latestDate) {
+          latestDate = dateStr;
+          deleteRowIndex = r + 2;
+        }
+      }
+      if (deleteRowIndex >= 0) {
+        sheet.deleteRow(deleteRowIndex);
+        return "✅ '" + rawName + "' 도면이 삭제되었습니다.";
+      }
     }
 
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) {
-      return `❌ 삭제할 데이터가 없습니다.`;
-    }
-
-    // 마지막 행 삭제
-    sheet.deleteRow(lastRow);
-    
-    // 남은 데이터가 없으면 시트 삭제
-    if (sheet.getLastRow() < 2) {
-      ss.deleteSheet(sheet);
-      return `✅ '${baseName}' 시트가 완전히 삭제되었습니다.`;
-    }
-
-    return `✅ '${baseName}' 시트의 마지막 저장 항목이 삭제되었습니다.`;
+    // 예전 방식: 현장명으로 된 시트에서 마지막 행 삭제
+    const baseName = sanitizeSheetName_(rawName);
+    const oldSheet = ss.getSheetByName(baseName);
+    if (!oldSheet) return "❌ '" + rawName + "' 데이터를 찾을 수 없습니다.";
+    const lastRow = oldSheet.getLastRow();
+    if (lastRow < 2) return "❌ 삭제할 데이터가 없습니다.";
+    oldSheet.deleteRow(lastRow);
+    if (oldSheet.getLastRow() < 2) ss.deleteSheet(oldSheet);
+    return "✅ '" + rawName + "' 도면이 삭제되었습니다.";
   } catch (e) {
     return "❌ 삭제 오류: " + e.toString();
   } finally {
@@ -205,32 +296,40 @@ function deleteFromSheet(siteName) {
 // 견적서 관련 함수
 // ========================================
 
+/** 단가표 캐시 키 (CacheService, TTL 180초) */
+var PRICE_TABLES_CACHE_KEY = 'priceTables';
+var PRICE_TABLES_CACHE_TTL = 180;
+
 /**
  * 📊 모든 단가표 읽기
- * - "(품목)" 포함된 시트만 읽기
- * - 반환: JSON 문자열 { "공정명": [ {품목, 규격, 단위, 재료비, 노무비}, ... ] }
+ * - 캐시 있으면 즉시 반환(시트 읽기 0회). 없으면 (품목) 시트 읽어서 캐시 후 반환.
  */
 function getAllPriceTables() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.get(PRICE_TABLES_CACHE_KEY);
+    if (cached != null) return cached;
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheets = ss.getSheets();
     const result = {};
 
     sheets.forEach(sheet => {
       const name = sheet.getName();
-      
-      // "(품목)" 포함된 시트만 단가표로 인식
       if (name.includes('(품목)')) {
         const category = name.replace('(품목)', '').trim();
         const data = sheet.getDataRange().getValues();
-        
-        // 헤더(1행) 제외하고 데이터 파싱
         const items = [];
+        let hasMaejiSub = false;
         for (let i = 1; i < data.length; i++) {
           const row = data[i];
-          if (row[0]) { // 품목명이 있으면
+          if (row[0]) {
+            const itemName = String(row[0] || '');
+            if (category === '화장실공사' && itemName === '매지 부자재') {
+              hasMaejiSub = true;
+            }
             items.push({
-              item: String(row[0] || ''),
+              item: itemName,
               spec: String(row[1] || ''),
               unit: String(row[2] || ''),
               materialPrice: Number(row[3] || 0),
@@ -238,14 +337,27 @@ function getAllPriceTables() {
             });
           }
         }
-        
-        if (items.length > 0) {
-          result[category] = items;
+
+        // 화장실공사(품목)에 '매지 부자재'가 없으면 자동으로 한 줄 추가
+        if (category === '화장실공사' && !hasMaejiSub) {
+          const newRow = ['매지 부자재', '', '포', 0, 0];
+          sheet.appendRow(newRow);
+          items.push({
+            item: newRow[0],
+            spec: newRow[1],
+            unit: newRow[2],
+            materialPrice: newRow[3],
+            laborPrice: newRow[4]
+          });
         }
+
+        if (items.length > 0) result[category] = items;
       }
     });
 
-    return JSON.stringify(result);
+    const json = JSON.stringify(result);
+    cache.put(PRICE_TABLES_CACHE_KEY, json, PRICE_TABLES_CACHE_TTL);
+    return json;
   } catch (e) {
     return JSON.stringify({ error: e.toString() });
   }
@@ -369,6 +481,7 @@ function verifyAdminPassword(password) {
  * 💾 품목 추가/수정/삭제 저장
  * - category: 공정명 (예: "목공사")
  * - items: 품목 배열 [{item, spec, unit, materialPrice, laborPrice}, ...]
+ * - 한 번에 setValues로 쓰기 때문에 appendRow 반복보다 훨씬 빠름
  */
 function savePriceTableItems(category, itemsJson) {
   const lock = LockService.getScriptLock();
@@ -379,35 +492,13 @@ function savePriceTableItems(category, itemsJson) {
     const sheetName = category + '(품목)';
     let sheet = ss.getSheetByName(sheetName);
     
-    // 시트가 없으면 생성
-    if (!sheet) {
-      sheet = ss.insertSheet(sheetName);
-      // 헤더 추가
-      sheet.appendRow(['품목', '규격', '단위', '재료비단가', '노무비단가']);
-      // 헤더 서식 설정
-      const headerRange = sheet.getRange(1, 1, 1, 5);
-      headerRange.setBackground('#000000');
-      headerRange.setFontColor('#FFFFFF');
-      headerRange.setFontWeight('bold');
-      headerRange.setHorizontalAlignment('center');
-      // 열 너비 설정
-      for (let col = 1; col <= 5; col++) {
-        sheet.setColumnWidth(col, 150);
-      }
-    } else {
-      // 기존 데이터 삭제 (헤더 제외)
-      const lastRow = sheet.getLastRow();
-      if (lastRow > 1) {
-        sheet.deleteRows(2, lastRow - 1);
-      }
-    }
-    
     // 품목 데이터 파싱
     const items = JSON.parse(itemsJson);
     
-    // 데이터 입력
-    items.forEach(item => {
-      sheet.appendRow([
+    // 헤더 + 전체 데이터를 2차원 배열로 구성 (한 번에 쓰기)
+    const rows = [['품목', '규격', '단위', '재료비단가', '노무비단가']];
+    items.forEach(function(item) {
+      rows.push([
         String(item.item || ''),
         String(item.spec || ''),
         String(item.unit || ''),
@@ -416,9 +507,35 @@ function savePriceTableItems(category, itemsJson) {
       ]);
     });
     
-    return `✅ ${category} 품목 ${items.length}개가 저장되었습니다.`;
+    // 시트가 없으면 생성
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      for (let col = 1; col <= 5; col++) {
+        sheet.setColumnWidth(col, 150);
+      }
+    }
+    
+    // 한 번에 쓰기 (appendRow 반복 대신 setValues 1회)
+    if (rows.length > 0) {
+      sheet.getRange(1, 1, rows.length, 5).setValues(rows);
+      // 기존에 더 많은 행이 있었으면 남은 행 삭제
+      const lastRow = sheet.getLastRow();
+      if (lastRow > rows.length) {
+        sheet.deleteRows(rows.length + 1, lastRow - rows.length);
+      }
+    }
+    
+    // 헤더 서식 (1행만)
+    const headerRange = sheet.getRange(1, 1, 1, 5);
+    headerRange.setBackground('#000000');
+    headerRange.setFontColor('#FFFFFF');
+    headerRange.setFontWeight('bold');
+    headerRange.setHorizontalAlignment('center');
+
+    CacheService.getScriptCache().remove(PRICE_TABLES_CACHE_KEY);
+    return '✅ ' + category + ' 품목 ' + items.length + '개가 저장되었습니다.';
   } catch (e) {
-    return "❌ 저장 오류: " + e.toString();
+    return '❌ 저장 오류: ' + e.toString();
   } finally {
     lock.releaseLock();
   }
@@ -449,18 +566,14 @@ function setupPriceTables() {
       ['중문슬팀3연동', '높이2100', '개', 800000, 200000],
       ['상부장제작', '', 'm', 65000, 50000],
       ['하부장제작', '', 'm', 75000, 50000],
-      ['인포제작', '', 'm', 89000, 65000],
-      ['박시공', '', 'm', 80000, 55000],
       ['몰딩시공', '20cm계단몰딩 백색', 'm', 2500, 4500],
       ['걸레받이시공', '30cm 백색', 'm', 2500, 3500],
       ['우물천장만들기', '', 'm²', 12000, 15000],
       ['단열작업', '', 'm²', 15000, 13500],
       ['보강작업', '', '식', 0, 0],
-      ['붙박이 의자 만들기', '', 'm', 35000, 26000],
       ['벽체 모양내기', '', '식', 0, 0],
       ['다테일공사', '', '식', 0, 0],
       ['공구손료', '', '인', 0, 60000],
-      ['루바작업', '', 'm²', 20000, 28000],
       ['철물', '', '식', 0, 0]
     ],
     
@@ -468,6 +581,8 @@ function setupPriceTables() {
       ['품목', '규격', '단위', '재료비단가', '노무비단가'],
       ['전기배선공사(인)', '전선 및 배관', '인', 25000, 280000],
       ['전기배선공사(평)', '전선 및 배관', '평', 40000, 120000],
+      ['분전한 교체공사', '', '식', 0, 0],
+      ['단독 전기선 공사', '', '평', 0, 0],
       ['매입 센서등', '3인치 타공형', '개', 27000, 4000],
       ['센서등', '6인치', '개', 15000, 4000],
       ['거실등', '', '개', 160000, 6000],
@@ -499,6 +614,7 @@ function setupPriceTables() {
       ['화장실 바닥타일', '600*600', 'm²', 22000, 24000],
       ['화장실 벽체타일', '600*600', 'm²', 22000, 24000],
       ['매지', '', '인', 0, 250000],
+      ['매지 부자재', '', '포', 0, 0],
       ['타일부자재', '', 'm²', 10000, 0],
       ['양변기', 'into 양변기 c1002', '개', 190000, 40000],
       ['세면대', 'into 세면대 L337-1', '개', 140000, 50000],
@@ -512,7 +628,7 @@ function setupPriceTables() {
       ['청소걸', '비엔트 청소걸', '개', 18000, 5000],
       ['해바라기샤워수전', '비엔트 레인수전2009', '개', 140000, 15000],
       ['습진장', '', '개', 160000, 20000],
-      ['거울장', '1500*800', '개', 160000, 30000],
+      ['돔천장', '1500*800', '개', 160000, 30000],
       ['간접 타입 욕실거울', '600*800', '개', 130000, 10000],
       ['욕조', '매립욕조1500~1700mm', '개', 185000, 40000],
       ['욕조조적', '', '식', 80000, 120000],
