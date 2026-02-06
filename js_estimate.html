@@ -43,18 +43,23 @@ function initEstimateScreen() {
     }
   }
   
-  // 초기 화면: 도면 선택 버튼 표시
+  // 초기 화면: 도면 선택 / 저장된 견적 불러오기
   container.innerHTML = `
     <div class="text-center mt-5">
       <h3 class="text-white mb-4">
         <i class="bi bi-calculator-fill"></i> 견적서 작성
       </h3>
       <p class="text-secondary mb-4">
-        견적서를 작성할 도면을 선택하세요
+        견적서를 작성할 도면을 선택하거나, 저장된 견적을 불러오세요.
       </p>
-      <button class="btn btn-primary btn-lg" onclick="showDrawingListModal()">
-        <i class="bi bi-folder2-open"></i> 도면 선택
-      </button>
+      <div class="d-flex gap-3 justify-content-center flex-wrap">
+        <button class="btn btn-primary btn-lg" onclick="showDrawingListModal()">
+          <i class="bi bi-folder2-open"></i> 도면 선택
+        </button>
+        <button class="btn btn-outline-light btn-lg" onclick="showLoadEstimateModal()">
+          <i class="bi bi-folder2-open"></i> 저장된 견적 불러오기
+        </button>
+      </div>
     </div>
   `;
   
@@ -356,18 +361,17 @@ function analyzeDrawing() {
     addEstimateItem('가설철거', '타일철거', '', 'm²', tileRemovalArea, 0, 35000);
   }
   
-  // 6. 붙박이장철거 (도면 붙박이장 길이 → 자, 1자=30cm)
-  let closetLength = 0;
+  // 6. 붙박이장철거 (도면 붙박이장+낮은장 합산 → 자, 1자=30cm)
+  let closetLowMm = 0;
   if (currentDrawing.furnitureLines) {
     currentDrawing.furnitureLines.forEach(f => {
-      if (f.type === 'closet') {
-        const len = Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000; // mm → m
-        closetLength += len;
+      if (f.type === 'closet' || f.type === 'low') {
+        closetLowMm += Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y); // mm
       }
     });
   }
-  if (closetLength > 0) {
-    const closetJa = Math.ceil(closetLength / 0.3); // m → 자 (1자 = 30cm)
+  if (closetLowMm > 0) {
+    const closetJa = Math.ceil(closetLowMm / 300); // 300mm = 1자
     addEstimateItem('가설철거', '붙박이장철거', '30cm', '자', closetJa, 0, 9000);
   }
   
@@ -538,7 +542,7 @@ function calculateItemQuantity(category, priceItem, drawing) {
   
   // 구역별 면적
   let bathroomArea = 0, bathroomPerimeter = 0, bathroomCount = 0;
-  let verandaArea = 0, entranceArea = 0;
+  let verandaArea = 0, verandaPerimeter = 0, entranceArea = 0;
   
   zones.forEach(z => {
     const area = Number(z.area) || 0;
@@ -555,7 +559,16 @@ function calculateItemQuantity(category, priceItem, drawing) {
         }
       }
     }
-    if (name.startsWith('발코니') || name.startsWith('베란다')) verandaArea += area;
+    if (name.startsWith('발코니') || name.startsWith('베란다')) {
+      verandaArea += area;
+      if (z.pts && z.pts.length >= 2) {
+        for (let i = 0; i < z.pts.length; i++) {
+          const p1 = z.pts[i];
+          const p2 = z.pts[(i + 1) % z.pts.length];
+          verandaPerimeter += Math.hypot(p2.x - p1.x, p2.y - p1.y) / 1000;
+        }
+      }
+    }
     if (name.startsWith('현관')) entranceArea += area;
   });
   
@@ -565,7 +578,7 @@ function calculateItemQuantity(category, priceItem, drawing) {
   // 가설철거 항목들
   if (category === '가설철거') {
     if (item === '먹메김/내부 수평비계') return Math.ceil(totalArea);
-    if (item === '보양/현장 정리작업') return Math.ceil(totalArea);
+    if (item === '보양/현장 정리작업' || item === '보양/현장 정리정돈') return Math.ceil(totalArea); // 수량 = 전체 면적(m²)
     if (item === '공사중폐자재반출') return 2;
     if (item === '전체철거') return Math.ceil(totalPyeong);
     if (item === '조명철거') return Math.ceil(totalPyeong);
@@ -581,15 +594,15 @@ function calculateItemQuantity(category, priceItem, drawing) {
       return Math.ceil(flooringArea / 3.3);
     }
     if (item === '타일철거') return Math.ceil(verandaArea + entranceArea);
-    // 붙박이장 철거: 도면 붙박이장 길이 → 자 (1자 = 30cm)
+    // 붙박이장 철거: 도면 붙박이장+낮은장 합산(mm) / 300 → 자 (1자 = 30cm)
     if (item === '불박이장철거' || item === '붙박이장철거') {
-      let lenM = 0;
+      let lenMm = 0;
       furnitureLines.forEach(f => {
-        if (f.type === 'closet') {
-          lenM += Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y) / 1000; // mm → m
+        if (f.type === 'closet' || f.type === 'low') {
+          lenMm += Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y); // mm
         }
       });
-      return Math.ceil(lenM / 0.3); // m → 자 (1자 = 30cm)
+      return lenMm > 0 ? Math.ceil(lenMm / 300) : 1; // 300mm = 1자
     }
     if (item === '신발장철거') {
       let len = 0;
@@ -700,11 +713,11 @@ function calculateItemQuantity(category, priceItem, drawing) {
     if (item === '레인스웨이' || item === '레일' || item === '레일등' || item === '벽까기' || item === '실링팬') return 1;
   }
 
-  // 설비공사: 2번 화장실 방수 = 화장실 바닥 평수 합, 11번 단채움 = 화장실 헤베*0.04, 나머지 직접기입
+  // 설비공사: 2번 화장실 방수 = 화장실 바닥 평수 합, 11번 단채움 = 화장실 바닥면적*0.05 소수점 1자리
   if (category === '설비공사') {
     const bathroomPyeong = bathroomArea / 3.3;
     if (item === '화장실 방수') return bathroomPyeong > 0 ? Math.round(bathroomPyeong * 100) / 100 : 1;
-    if (item === '단채움') return bathroomArea > 0 ? Math.round(bathroomArea * 0.04 * 100) / 100 : 1;
+    if (item === '단채움') return bathroomArea > 0 ? Math.round(bathroomArea * 0.05 * 10) / 10 : 1;
   }
 
   // 화장실공사: 도면 기반 수량 계산
@@ -739,9 +752,9 @@ function calculateItemQuantity(category, priceItem, drawing) {
     
     // 5-14번: 화장실 개수
     if (item === '양변기' || item === '세면대' || item === '세면수전' || 
-        item === '욕조샤워수전' || item === '욕실액서사리' || item === '욕조 액서사리' || item === '수건걸이' || 
+        item === '욕조샤워수전' || item === '욕실액서사리' || item === '수건걸이' || 
         item === '휴지걸이' || item === '트렌치 라인 유가(통)' || item === '라인 유가(사각)' || 
-        item === '청소걸' || item === '해바라기샤워수전') {
+        item === '청소걸' || item === '청소건' || item === '해바라기샤워수전') {
       return bathroomCount > 0 ? bathroomCount : 1;
     }
     
@@ -788,8 +801,8 @@ function calculateItemQuantity(category, priceItem, drawing) {
       return bathroomCount > 0 ? bathroomCount : 1;
     }
     
-    // 25-28번: 힘펠환풍기 = 화장실 개수, 나머지 직접 기입 (가벽, 큐비클, 유리부스, 잡부)
-    if (item === '힘펠천풍기') {
+    // 25-28번: 힘펠환풍기·티오람 미니 = 화장실 개수, 나머지 직접 기입 (가벽, 큐비클, 유리부스, 잡부)
+    if (item === '힘펠천풍기' || item === '티오람 미니') {
       return bathroomCount > 0 ? bathroomCount : 1;
     }
     if (item === '가벽' || item === '큐비클' || 
@@ -843,7 +856,34 @@ function calculateItemQuantity(category, priceItem, drawing) {
       return qty > 0 ? qty : 1;
     }
 
-    // 6~8번: 필름 자재비/부자재/인건비는 직접 기입
+    // 문 개수·현관 개수 (6~9번용)
+    const doorCount = doors.length || 0;
+    const entranceCount = zones.filter(z => (z.name || '').trim().startsWith('현관')).length || 0;
+
+    // 6번: 문필름 재료비 = 문 개수 × 4.5 (M)
+    if (item === '문필름 재료비') {
+      const m = doorCount * 4.5;
+      return m > 0 ? Math.round(m * 100) / 100 : 1;
+    }
+    // 7번: 문+문틀 필름 재료비 = 문 개수 × 7 (M)
+    if (item === '문+문틀 필름 재료비') {
+      const m = doorCount * 7;
+      return m > 0 ? Math.round(m * 100) / 100 : 1;
+    }
+    // 8번: 문틀 필름 재료비 = 문 개수 × 3 (M)
+    if (item === '문틀 필름 재료비') {
+      const m = doorCount * 3;
+      return m > 0 ? Math.round(m * 100) / 100 : 1;
+    }
+    // 9번: 현관 필름 자재비 = 현관 개수 × 3.5 (M)
+    if (item === '현관 필름 자재비') {
+      const m = entranceCount * 3.5;
+      return m > 0 ? Math.round(m * 100) / 100 : 1;
+    }
+    // 10~11번: 직접 입력 (샷시, 싱크 문짝)
+    if (item === '샷시 필름 자재비' || item === '싱크 문짝 필름 자재비') return 1;
+    // 12~13번: 필름 부자재·인건비 = 6~11 체크항목 M합 → sync필름부자재및인건비Qty()에서 설정
+    if (item === '필름 부자재' || item === '필름 인건비') return 1;
     return 1;
   }
 
@@ -890,6 +930,43 @@ function calculateItemQuantity(category, priceItem, drawing) {
     return 1;
   }
 
+  // 싱크가구공사: 붙박이장·싱크대·신발장·낮은장 도면 가구선 길이 → 자(30cm) 올림, 나머지 직접기입
+  if (category === '싱크가구공사') {
+    let closetMm = 0, sinkMm = 0, shoesMm = 0, lowMm = 0;
+    (furnitureLines || []).forEach(f => {
+      if (!f || !f.p1 || !f.p2) return;
+      const len = Math.hypot(f.p2.x - f.p1.x, f.p2.y - f.p1.y);
+      if (f.type === 'closet') closetMm += len;
+      if (f.type === 'sink') sinkMm += len;
+      if (f.type === 'shoes') shoesMm += len;
+      if (f.type === 'low') lowMm += len;
+    });
+    // 1자 = 300mm → 올림 정수
+    if (item === '붙박이장') return closetMm > 0 ? Math.ceil(closetMm / 300) : 1;
+    if (item === '싱크대' || item === '싱크대장') return sinkMm > 0 ? Math.ceil(sinkMm / 300) : 1;
+    if (item === '신발장') return shoesMm > 0 ? Math.ceil(shoesMm / 300) : 1;
+    if (item === '낮은장') return lowMm > 0 ? Math.ceil(lowMm / 300) : 1;
+  }
+
+  // 도장공사: 1·2·4·5번 = 발코니 벽+천장 면적(m²), 3번 직접기입
+  if (category === '도장공사') {
+    const wallHeightM = (Number(height) || 2300) / 1000;
+    const verandaWallArea = verandaPerimeter * wallHeightM;
+    const verandaWallCeiling = verandaArea + verandaWallArea; // 천장(=바닥) + 벽
+    const qty = verandaWallCeiling > 0 ? Math.ceil(verandaWallCeiling) : 1;
+
+    if (item === '도장밑작업' || item === '도장작업' || item === '비닐보양' || item === '탄성코트') {
+      return qty;
+    }
+    // 3번 스테인작업: 직접기입
+  }
+
+  // 기타공사: 1·2번 = 전체 평수, 3·4번 직접기입
+  if (category === '기타공사') {
+    const fullPyeong = totalPyeong > 0 ? Math.ceil(totalPyeong) : 1;
+    if (item === '청소' || item === '실리콘마감') return fullPyeong;
+  }
+
   return 1; // 기본값
 }
 
@@ -930,11 +1007,39 @@ function sync철물Amount() {
   chul.totalAmount = amt;
 }
 
+// 도배필름공사 12·13번: 6~11번 체크된 항목의 M 수 합
+const 도배필름_6부터11_품목명 = ['문필름 재료비', '문+문틀 필름 재료비', '문틀 필름 재료비', '현관 필름 자재비', '샷시 필름 자재비', '싱크 문짝 필름 자재비'];
+function get필름부자재및인건비Quantity() {
+  const sum = estimateItems
+    .filter(e => e.category === '도배필름공사' && 도배필름_6부터11_품목명.includes(e.item))
+    .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+  return Math.round(sum * 100) / 100;
+}
+
+function sync필름부자재및인건비Qty() {
+  const q = get필름부자재및인건비Quantity();
+  ['필름 부자재', '필름 인건비'].forEach(itemName => {
+    const row = estimateItems.find(e => e.category === '도배필름공사' && e.item === itemName);
+    if (!row) return;
+    row.qty = q;
+    row.materialAmount = Math.round(q * (row.materialPrice || 0));
+    row.laborAmount = Math.round(q * (row.laborPrice || 0));
+    row.totalAmount = row.materialAmount + row.laborAmount;
+  });
+}
+
 // =========================
 // ✅ 견적 항목 추가
 // =========================
 function addEstimateItem(category, item, spec, unit, qty, materialPrice, laborPrice) {
-  const finalQty = Math.ceil(qty); // 무조건 올림
+  let finalQty;
+  if (category === '도배필름공사' && unit === 'M') {
+    finalQty = Math.round((Number(qty) || 0) * 100) / 100 || 1;
+  } else if (category === '설비공사' && item === '단채움') {
+    finalQty = (Number(qty) != null && Number(qty) >= 0) ? Math.round(Number(qty) * 10) / 10 : 1; // 소수점 1자리
+  } else {
+    finalQty = Math.ceil(qty);
+  }
   estimateItems.push({
     category: category,
     item: item,
@@ -957,13 +1062,156 @@ function saveCurrentEstimate() {
     const data = {
       drawing: currentDrawing,
       items: estimateItems,
-      settings: estimateSettings,
+      settings: { ...estimateSettings },
       priceTables: priceTables
     };
     localStorage.setItem('currentEstimate', JSON.stringify(data));
   } catch (e) {
     console.error('견적 저장 실패:', e);
   }
+}
+
+// =========================
+// ✅ 견적 로컬 저장 목록 (이름으로 여러 개 저장)
+// =========================
+const SAVED_ESTIMATES_KEY = 'savedEstimatesList';
+
+function getSavedEstimatesList() {
+  try {
+    const raw = localStorage.getItem(SAVED_ESTIMATES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function setSavedEstimatesList(list) {
+  try {
+    localStorage.setItem(SAVED_ESTIMATES_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.error('저장 목록 쓰기 실패:', e);
+  }
+}
+
+// 이름을 입력받아 현재 견적을 목록에 추가 저장
+function saveEstimateToLocal() {
+  if (!currentDrawing && estimateItems.length === 0) {
+    alert('저장할 견적 내용이 없습니다. 도면을 선택한 뒤 견적을 작성해 주세요.');
+    return;
+  }
+  const name = prompt('저장할 견적 이름을 입력하세요.', estimateSettings.siteName || '견적 ' + new Date().toLocaleDateString());
+  if (name == null || String(name).trim() === '') return;
+
+  const data = {
+    drawing: currentDrawing,
+    items: JSON.parse(JSON.stringify(estimateItems)),
+    settings: { ...estimateSettings },
+    priceTables: JSON.parse(JSON.stringify(priceTables))
+  };
+  const list = getSavedEstimatesList();
+  const id = 'e_' + Date.now();
+  list.unshift({
+    id: id,
+    name: String(name).trim(),
+    savedAt: Date.now(),
+    data: data
+  });
+  setSavedEstimatesList(list);
+  alert('"' + String(name).trim() + '"(으)로 저장했습니다.');
+}
+
+// 저장된 견적 불러오기 모달 표시
+function showLoadEstimateModal() {
+  if (!document.getElementById('loadEstimateModal')) {
+    createLoadEstimateModal();
+  }
+  const list = getSavedEstimatesList();
+  const content = document.getElementById('loadEstimateContent');
+  if (!content) return;
+
+  if (list.length === 0) {
+    content.innerHTML = `
+      <div class="text-center p-4 text-secondary">
+        <i class="bi bi-inbox"></i> 저장된 견적이 없습니다.<br>
+        <small>견적서 작성 후 "저장하기"로 저장하세요.</small>
+      </div>`;
+  } else {
+    content.innerHTML = list.map(function (s) {
+      const dateStr = new Date(s.savedAt).toLocaleString('ko-KR');
+      const itemCount = (s.data && s.data.items) ? s.data.items.length : 0;
+      return `
+        <div class="d-flex align-items-center justify-content-between border border-secondary rounded p-2 mb-2">
+          <div>
+            <strong>${escapeHtml(s.name)}</strong>
+            <small class="text-secondary d-block">${dateStr} · 항목 ${itemCount}개</small>
+          </div>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-primary" onclick="loadSavedEstimate('${s.id}')">
+              <i class="bi bi-folder2-open"></i> 불러오기
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteSavedEstimate('${s.id}')">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+  const modal = new bootstrap.Modal(document.getElementById('loadEstimateModal'));
+  modal.show();
+}
+
+function createLoadEstimateModal() {
+  const modalHTML = `
+    <div class="modal fade" id="loadEstimateModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark text-white border-secondary">
+          <div class="modal-header border-secondary">
+            <h5 class="modal-title"><i class="bi bi-folder2-open"></i> 저장된 견적 불러오기</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+            <div id="loadEstimateContent"></div>
+          </div>
+          <div class="modal-footer border-secondary">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function loadSavedEstimate(id) {
+  const list = getSavedEstimatesList();
+  const found = list.find(function (s) { return s.id === id; });
+  if (!found || !found.data) {
+    alert('해당 견적을 찾을 수 없습니다.');
+    return;
+  }
+  const d = found.data;
+  currentDrawing = d.drawing || null;
+  estimateItems = Array.isArray(d.items) ? d.items : [];
+  if (d.settings) {
+    estimateSettings.siteName = d.settings.siteName != null ? d.settings.siteName : '';
+    estimateSettings.area = d.settings.area != null ? d.settings.area : 0;
+    estimateSettings.overheadRate = d.settings.overheadRate != null ? d.settings.overheadRate : 5;
+    estimateSettings.profitRate = d.settings.profitRate != null ? d.settings.profitRate : 10;
+    estimateSettings.vatRate = d.settings.vatRate != null ? d.settings.vatRate : 10;
+  }
+  if (d.priceTables && typeof d.priceTables === 'object') {
+    priceTables = d.priceTables;
+  }
+  saveCurrentEstimate();
+  const modal = bootstrap.Modal.getInstance(document.getElementById('loadEstimateModal'));
+  if (modal) modal.hide();
+  renderEstimateUI();
+}
+
+function deleteSavedEstimate(id) {
+  if (!confirm('이 저장 견적을 삭제하시겠습니까?')) return;
+  const list = getSavedEstimatesList().filter(function (s) { return s.id !== id; });
+  setSavedEstimatesList(list);
+  showLoadEstimateModal();
 }
 
 // =========================
@@ -1013,6 +1261,7 @@ function renderEstimateUI() {
   const container = document.getElementById('estimate-container');
   if (!container) return;
   
+  sync필름부자재및인건비Qty();
   const totals = calculateTotals();
   
   // 구역별 개수 (상단 표시용)
@@ -1044,12 +1293,18 @@ function renderEstimateUI() {
       <h3 class="fw-bold m-0 text-white">
         <i class="bi bi-calculator-fill"></i> 견적서 작성
       </h3>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-wrap">
         <button class="btn btn-outline-info btn-sm" onclick="startNewEstimate()">
           <i class="bi bi-plus-circle"></i> 새 견적
         </button>
+        <button class="btn btn-outline-warning btn-sm" onclick="saveEstimateToLocal()" title="현재 견적을 이름으로 로컬에 저장">
+          <i class="bi bi-save-fill"></i> 저장하기
+        </button>
+        <button class="btn btn-outline-light btn-sm" onclick="showLoadEstimateModal()" title="저장된 견적 불러오기">
+          <i class="bi bi-folder2-open"></i> 불러오기
+        </button>
         <button class="btn btn-outline-success btn-sm" onclick="saveEstimate()">
-          <i class="bi bi-save"></i> 저장
+          <i class="bi bi-cloud-upload"></i> 서버 저장
         </button>
         <button class="btn btn-outline-danger btn-sm" onclick="exportEstimatePDF()">
           <i class="bi bi-file-pdf"></i> PDF로 내보내기
@@ -1147,13 +1402,17 @@ function renderEstimateUI() {
       let calculatedQty = 1; // 기본값
       if (category === '목공사' && priceItem.item === '공구손료') {
         calculatedQty = get공구손료Quantity();
+      } else if (category === '도배필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비')) {
+        calculatedQty = get필름부자재및인건비Quantity();
       } else if (currentDrawing) {
         calculatedQty = calculateItemQuantity(category, priceItem, currentDrawing);
       }
       
-      // 체크된 항목이 있으면 저장된 수량 사용, 없으면 계산된 수량 사용 (공구손료는 항상 계산값)
+      // 체크된 항목이 있으면 저장된 수량 사용, 없으면 계산된 수량 사용 (공구손료·필름 부자재/인건비는 항상 계산값)
       const isChecked = !!estimateItem;
-      const qty = (category === '목공사' && priceItem.item === '공구손료') ? calculatedQty : (estimateItem ? estimateItem.qty : calculatedQty);
+      const is필름부자재인건비Row = (category === '도배필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비'));
+      const qty = (category === '목공사' && priceItem.item === '공구손료') ? calculatedQty
+        : (is필름부자재인건비Row ? calculatedQty : (estimateItem ? estimateItem.qty : calculatedQty));
       const is철물Row = (category === '목공사' && priceItem.item === '철물');
       let materialAmt = Math.round(qty * priceItem.materialPrice);
       let laborAmt = Math.round(qty * priceItem.laborPrice);
@@ -1165,7 +1424,9 @@ function renderEstimateUI() {
       }
       const is공구손료Row = (category === '목공사' && priceItem.item === '공구손료');
       const is철물QtyReadonly = (category === '목공사' && priceItem.item === '철물');
-      const qtyReadonlyAttr = is공구손료Row ? 'readonly title="목공사 체크 항목 노무비 합÷25만 자동"' : (is철물QtyReadonly ? 'readonly title="식 1 고정, 재료비=체크된 목공사 재료비 합×10%"' : '');
+      const qtyReadonlyAttr = is공구손료Row ? 'readonly title="목공사 체크 항목 노무비 합÷25만 자동"' 
+        : (is철물QtyReadonly ? 'readonly title="식 1 고정, 재료비=체크된 목공사 재료비 합×10%"' 
+          : (is필름부자재인건비Row ? 'readonly title="6~11번 체크 항목 M 수 합산"' : ''));
       
       html += `
         <tr>
@@ -1180,7 +1441,7 @@ function renderEstimateUI() {
             <input type="number" class="form-control text-end" 
                    style="min-height: 38px; font-size: 16px;"
                    inputmode="decimal"
-                   value="${is철물QtyReadonly ? 1 : qty}" step="0.1" min="0"
+                   value="${(is철물QtyReadonly ? 1 : (is필름부자재인건비Row ? calculatedQty : qty))}" step="0.1" min="0"
                    onchange="updateEstimateItemQty('${category}', ${itemIdx}, this.value)"
                    id="qty_${catIdx}_${itemIdx}"
                    ${qtyReadonlyAttr}>
@@ -1190,6 +1451,37 @@ function renderEstimateUI() {
           <td class="text-end fw-bold" id="amt_${catIdx}_${itemIdx}">
             ${isChecked ? totalAmt.toLocaleString() : '-'}
           </td>
+        </tr>
+      `;
+    });
+    
+    // 직접입력 항목: 단가표에 없는 항목만 테이블에 행으로 표시 (품목명 초록색)
+    const priceItemKeys = new Set((priceItems || []).map(p => (p.item || '') + '\t' + (p.spec || '')));
+    const customItems = selectedItems.filter(ei => !priceItemKeys.has((ei.item || '') + '\t' + (ei.spec || '')));
+    customItems.forEach(customItem => {
+      const globalIdx = estimateItems.findIndex(e => e.category === category && e.item === customItem.item && String(e.spec || '') === String(customItem.spec || ''));
+      if (globalIdx < 0) return;
+      const qty = customItem.qty;
+      const materialAmt = customItem.materialAmount != null ? customItem.materialAmount : Math.round(qty * (customItem.materialPrice || 0));
+      const laborAmt = customItem.laborAmount != null ? customItem.laborAmount : Math.round(qty * (customItem.laborPrice || 0));
+      const totalAmt = customItem.totalAmount != null ? customItem.totalAmount : materialAmt + laborAmt;
+      html += `
+        <tr>
+          <td class="text-center">
+            <input type="checkbox" class="form-check-input" checked
+                   onchange="if(!this.checked){ removeItem(${globalIdx}); }">
+          </td>
+          <td style="white-space: normal; word-break: break-word; line-height: 1.3; color: #198754;" class="fw-bold">${escapeHtml(customItem.item)}</td>
+          <td style="color: #adb5bd; font-size: 0.9em;">${escapeHtml(customItem.spec || '-')}</td>
+          <td class="text-center">${escapeHtml(customItem.unit || '-')}</td>
+          <td>
+            <input type="number" class="form-control text-end" style="min-height: 38px; font-size: 16px;" inputmode="decimal"
+                   value="${qty}" step="0.1" min="0.01"
+                   onchange="updateCustomItemQtyByIndex(${globalIdx}, this.value); renderEstimateUI();">
+          </td>
+          <td class="text-end small">${(customItem.materialPrice || 0).toLocaleString()}</td>
+          <td class="text-end small">${(customItem.laborPrice || 0).toLocaleString()}</td>
+          <td class="text-end fw-bold">${totalAmt.toLocaleString()}</td>
         </tr>
       `;
     });
@@ -1330,6 +1622,7 @@ function toggleEstimateItem(category, itemIdx, isChecked) {
     sync공구손료Qty();
     sync철물Amount();
   }
+  if (category === '도배필름공사') sync필름부자재및인건비Qty();
   
   renderEstimateUI();
   
@@ -1371,13 +1664,20 @@ function updateEstimateItemQty(category, itemIdx, newQty) {
       setTimeout(() => window.scrollTo(0, scrollPos), 50);
       return;
     }
-    item.qty = Math.round(qty * 100) / 100;
-    item.materialAmount = Math.round(qty * item.materialPrice);
-    item.laborAmount = Math.round(qty * item.laborPrice);
+    // 필름 부자재/인건비는 6~11 체크항목 M합 자동, 수동 변경 불가
+    if (category === '도배필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비')) {
+      renderEstimateUI();
+      setTimeout(() => window.scrollTo(0, scrollPos), 50);
+      return;
+    }
+    item.qty = (category === '도배필름공사' && priceItem.unit === 'M') ? (Math.round(qty * 100) / 100 || 1) : (Math.round(qty * 100) / 100);
+    item.materialAmount = Math.round(item.qty * item.materialPrice);
+    item.laborAmount = Math.round(item.qty * item.laborPrice);
     item.totalAmount = item.materialAmount + item.laborAmount;
     // 목공사 항목 변경 시 공구손료/철물 동기화
     sync공구손료Qty();
     sync철물Amount();
+    if (category === '도배필름공사') sync필름부자재및인건비Qty();
     renderEstimateUI();
     
     // 스크롤 위치 복원
@@ -1495,6 +1795,18 @@ function removeItem(index) {
   
   estimateItems.splice(index, 1);
   renderEstimateUI();
+}
+
+// 직접입력 항목 수량 변경 (estimateItems 인덱스로)
+function updateCustomItemQtyByIndex(idx, newQty) {
+  const it = estimateItems[idx];
+  if (!it) return;
+  const qty = Math.max(0, Number(newQty) || 0);
+  if (qty <= 0) return;
+  it.qty = (it.unit === 'M' || it.unit === 'm²') ? (Math.round(qty * 100) / 100) : (Math.round(qty * 100) / 100);
+  it.materialAmount = Math.round(it.qty * (it.materialPrice || 0));
+  it.laborAmount = Math.round(it.qty * (it.laborPrice || 0));
+  it.totalAmount = it.materialAmount + it.laborAmount;
 }
 
 // =========================
@@ -1635,12 +1947,13 @@ function exportEstimatePDF() {
     items.forEach(function(item) {
       no++;
       catSum += Number(item.totalAmount) || 0;
+      const qtyDisplay = (item.category === '설비공사' && item.item === '단채움') ? Number(item.qty).toFixed(1) : Number(item.qty);
       rows += '<tr>' +
         '<td>' + no + '</td>' +
         '<td>' + escapeHtml(item.item) + '</td>' +
         '<td>' + escapeHtml(item.spec || '-') + '</td>' +
         '<td>' + item.unit + '</td>' +
-        '<td class="text-end">' + Number(item.qty) + '</td>' +
+        '<td class="text-end">' + qtyDisplay + '</td>' +
         '<td class="text-end">' + Number(item.materialPrice).toLocaleString() + '</td>' +
         '<td class="text-end">' + Number(item.materialAmount).toLocaleString() + '</td>' +
         '<td class="text-end">' + Number(item.laborPrice).toLocaleString() + '</td>' +
@@ -1651,26 +1964,15 @@ function exportEstimatePDF() {
     rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
   });
   
-  // 표지용 공정별 합계만 (세부 품목 제외)
-  let coverNo = 0;
-  let coverRows = '';
-  categoryOrder.forEach(function(cat) {
-    const items = byCategory[cat];
-    if (!items || items.length === 0) return;
-    let catSum = 0;
-    items.forEach(function(item) {
-      catSum += Number(item.totalAmount) || 0;
-    });
-    coverNo++;
-    coverRows += '<tr>' +
-      '<td class="text-center">' + coverNo + '</td>' +
-      '<td>' + escapeHtml(cat) + '</td>' +
-      '<td class="text-center">-</td>' +
-      '<td class="text-end">-</td>' +
-      '<td class="text-end">' + catSum.toLocaleString() + '</td>' +
-      '<td></td>' +
-      '</tr>';
-  });
+  // 표지(메인 1페이지): 단위 전체, 수량 전체1 한 줄만
+  const coverRows = '<tr>' +
+    '<td class="text-center">1</td>' +
+    '<td>전체</td>' +
+    '<td class="text-center">전체</td>' +
+    '<td class="text-end">전체1</td>' +
+    '<td class="text-end">' + totals.subtotal.toLocaleString() + '</td>' +
+    '<td></td>' +
+    '</tr>';
   
   // 작성일 포맷
   const now = new Date();
@@ -1888,12 +2190,13 @@ function exportEstimateExcel() {
     items.forEach(function(item) {
       no++;
       catSum += Number(item.totalAmount) || 0;
+      const qtyExport = (item.category === '설비공사' && item.item === '단채움') ? Number(item.qty).toFixed(1) : item.qty;
       csv += [
         no,
         '"' + (item.item || '').replace(/"/g, '""') + '"',
         '"' + (item.spec || '').replace(/"/g, '""') + '"',
         item.unit,
-        item.qty,
+        qtyExport,
         item.materialPrice,
         item.materialAmount,
         item.laborPrice,
