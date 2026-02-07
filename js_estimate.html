@@ -2162,20 +2162,53 @@ function exportEstimatePDF() {
     <tbody>${rows}</tbody>
   </table>
   <p class="print-hint" style="margin-top:16px;padding:10px;background:#fff3cd;border-radius:6px;font-size:14px;">
-    <strong>가로 인쇄:</strong> 아래 버튼 클릭 후 인쇄 창에서 <strong>방향 → 가로</strong>를 선택한 뒤 PDF로 저장하세요.
+    <strong>가로 인쇄:</strong> 위쪽 또는 아래 버튼 클릭 후 인쇄 창에서 <strong>방향 → 가로</strong>를 선택한 뒤 PDF로 저장하세요.
   </p>
   <div class="preview-actions">
-    <button type="button" onclick="window.print();" class="btn-print">인쇄하여 PDF로 저장</button>
-    <button type="button" onclick="window.close();" class="btn-close">닫기</button>
+    <button type="button" onclick="typeof window.print==='function'&&window.print();" class="btn-print">인쇄하여 PDF로 저장</button>
+    <button type="button" onclick="if(window.parent&&window.parent.closePdfPreviewModal){window.parent.closePdfPreviewModal();}else if(window.close){window.close();}" class="btn-close">닫기</button>
   </div>
 </div>
 </body>
 </html>`;
   
-  const w = window.open('', '_blank', 'width=1020,height=720,scrollbars=yes,resizable=yes');
-  w.document.write(html);
-  w.document.close();
-  w.focus();
+  // 앱 내부 모달에서 열기
+  const modalEl = document.getElementById('pdfPreviewModal');
+  const iframeEl = document.getElementById('pdfPreviewIframe');
+  if (modalEl && iframeEl) {
+    const doc = iframeEl.contentDocument || iframeEl.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    // 인쇄 버튼: iframe 내용만 인쇄
+    const printBtn = document.getElementById('pdfPreviewPrintBtn');
+    if (printBtn) {
+      printBtn.onclick = function() {
+        try {
+          (iframeEl.contentWindow || iframeEl.contentDocument.defaultView).print();
+        } catch (e) {
+          alert('인쇄 실패: ' + (e.message || e));
+        }
+      };
+    }
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+  } else {
+    // 모달이 없으면 기존처럼 새 창으로
+    const w = window.open('', '_blank', 'width=1020,height=720,scrollbars=yes,resizable=yes');
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+  }
+}
+
+/** PDF 미리보기 모달 닫기 (iframe 내부에서 호출 가능) */
+function closePdfPreviewModal() {
+  const modalEl = document.getElementById('pdfPreviewModal');
+  if (modalEl) {
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
+  }
 }
 
 function escapeHtml(s) {

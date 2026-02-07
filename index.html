@@ -350,6 +350,27 @@
     <div class="invisible btn btn-sm">홈</div>
   </div>
   <div class="container-fluid container-sm py-3 px-2 px-sm-3 screen-body" id="estimate-container"></div>
+
+  <!-- PDF 미리보기 모달 (앱 내부에서 열기) -->
+  <div class="modal fade" id="pdfPreviewModal" tabindex="-1" aria-labelledby="pdfPreviewModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen modal-dialog-scrollable">
+      <div class="modal-content bg-dark">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title text-white" id="pdfPreviewModalLabel"><i class="bi bi-file-pdf me-1"></i>견적서 미리보기</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="닫기"></button>
+        </div>
+        <div class="modal-body p-0 d-flex flex-column">
+          <iframe id="pdfPreviewIframe" style="width:100%;flex:1;min-height:70vh;border:none;background:#fff;"></iframe>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-primary" id="pdfPreviewPrintBtn">
+            <i class="bi bi-printer me-1"></i>인쇄하여 PDF로 저장
+          </button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 일정 -->
