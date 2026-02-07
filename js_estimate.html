@@ -1108,44 +1108,75 @@ function saveEstimateToLocal() {
   alert('"' + String(name).trim() + '"(으)로 저장했습니다.');
 }
 
-// 저장된 견적 불러오기 모달 표시
+// 저장된 견적 불러오기 모달 표시 (로컬 + 시트 목록)
 function showLoadEstimateModal() {
   if (!document.getElementById('loadEstimateModal')) {
     createLoadEstimateModal();
   }
-  const list = getSavedEstimatesList();
   const content = document.getElementById('loadEstimateContent');
   if (!content) return;
 
-  if (list.length === 0) {
-    content.innerHTML = `
-      <div class="text-center p-4 text-secondary">
-        <i class="bi bi-inbox"></i> 저장된 견적이 없습니다.<br>
-        <small>견적서 작성 후 "저장하기"로 저장하세요.</small>
-      </div>`;
-  } else {
-    content.innerHTML = list.map(function (s) {
-      const dateStr = new Date(s.savedAt).toLocaleString('ko-KR');
-      const itemCount = (s.data && s.data.items) ? s.data.items.length : 0;
-      return `
-        <div class="d-flex align-items-center justify-content-between border border-secondary rounded p-2 mb-2">
-          <div>
-            <strong>${escapeHtml(s.name)}</strong>
-            <small class="text-secondary d-block">${dateStr} · 항목 ${itemCount}개</small>
-          </div>
-          <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-primary" onclick="loadSavedEstimate('${s.id}')">
-              <i class="bi bi-folder2-open"></i> 불러오기
-            </button>
-            <button class="btn btn-sm btn-outline-danger" onclick="deleteSavedEstimate('${s.id}')">
-              <i class="bi bi-trash"></i>
-            </button>
-          </div>
-        </div>`;
-    }).join('');
-  }
+  const localList = getSavedEstimatesList();
+  content.innerHTML = '<div class="text-center p-3"><span class="spinner-border spinner-border-sm"></span> 불러오는 중...</div>';
   const modal = new bootstrap.Modal(document.getElementById('loadEstimateModal'));
   modal.show();
+
+  function render() {
+    var html = '';
+    if (localList.length > 0) {
+      html += '<p class="text-secondary small mb-2"><i class="bi bi-device-hdd"></i> 이 기기에서 저장한 견적</p>';
+      html += localList.map(function (s) {
+        const dateStr = new Date(s.savedAt).toLocaleString('ko-KR');
+        const itemCount = (s.data && s.data.items) ? s.data.items.length : 0;
+        return '<div class="d-flex align-items-center justify-content-between border border-secondary rounded p-2 mb-2">' +
+          '<div><strong>' + escapeHtml(s.name) + '</strong><small class="text-secondary d-block">' + dateStr + ' · 항목 ' + itemCount + '개</small></div>' +
+          '<div class="d-flex gap-1">' +
+          '<button class="btn btn-sm btn-primary" onclick="loadSavedEstimate(\'' + s.id + '\')"><i class="bi bi-folder2-open"></i> 불러오기</button>' +
+          '<button class="btn btn-sm btn-outline-danger" onclick="deleteSavedEstimate(\'' + s.id + '\')"><i class="bi bi-trash"></i></button>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    if (window.google && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(function (sheetListJson) {
+          var sheetList = [];
+          try { sheetList = JSON.parse(sheetListJson || '[]'); } catch (e) {}
+          if (sheetList.length > 0) {
+            html += '<hr class="border-secondary my-3">';
+            html += '<p class="text-secondary small mb-2"><i class="bi bi-cloud"></i> 시트에 저장된 견적</p>';
+            sheetList.forEach(function (siteName) {
+              var safe = (siteName || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+              html += '<div class="d-flex align-items-center justify-content-between border border-secondary rounded p-2 mb-2">' +
+                '<div><strong>' + escapeHtml(siteName) + '</strong><small class="text-secondary d-block">Google 시트</small></div>' +
+                '<button class="btn btn-sm btn-primary" data-sitename="' + safe + '" onclick="loadEstimateFromSheet(this.getAttribute(\'data-sitename\'))"><i class="bi bi-folder2-open"></i> 불러오기</button>' +
+                '</div>';
+            });
+          }
+          if (localList.length === 0 && sheetList.length === 0) {
+            html += '<div class="text-center p-4 text-secondary">' +
+              '<i class="bi bi-inbox"></i> 저장된 견적이 없습니다.<br>' +
+              '<small>견적서 작성 후 "저장하기"로 시트에 저장하거나, 이름을 입력해 이 기기에 저장하세요.</small></div>';
+          }
+          content.innerHTML = html;
+        })
+        .withFailureHandler(function () {
+          if (localList.length === 0) {
+            content.innerHTML = '<div class="text-center p-4 text-secondary"><i class="bi bi-inbox"></i> 저장된 견적이 없습니다.</div>';
+          } else {
+            content.innerHTML = html;
+          }
+        })
+        .getEstimateList();
+    } else {
+      if (localList.length === 0) {
+        content.innerHTML = '<div class="text-center p-4 text-secondary"><i class="bi bi-inbox"></i> 저장된 견적이 없습니다.</div>';
+      } else {
+        content.innerHTML = html;
+      }
+    }
+  }
+  render();
 }
 
 function createLoadEstimateModal() {
@@ -1194,6 +1225,55 @@ function loadSavedEstimate(id) {
   const modal = bootstrap.Modal.getInstance(document.getElementById('loadEstimateModal'));
   if (modal) modal.hide();
   renderEstimateUI();
+}
+
+// 시트에 저장된 견적 불러오기 (견적_현장명 시트)
+function loadEstimateFromSheet(siteName) {
+  if (!siteName || !window.google || !google.script || !google.script.run) {
+    alert('불러오기를 사용할 수 없습니다.');
+    return;
+  }
+  var name = (siteName || '').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+  google.script.run
+    .withSuccessHandler(function (jsonStr) {
+      if (!jsonStr) {
+        alert('해당 견적 시트를 읽을 수 없습니다.');
+        return;
+      }
+      try {
+        var d = JSON.parse(jsonStr);
+        currentDrawing = null;
+        estimateItems = migrate도배필름Category(Array.isArray(d.items) ? d.items : []);
+        estimateSettings.siteName = d.siteName != null ? d.siteName : name;
+        estimateSettings.area = d.area != null ? d.area : 0;
+        function done() {
+          saveCurrentEstimate();
+          var modal = bootstrap.Modal.getInstance(document.getElementById('loadEstimateModal'));
+          if (modal) modal.hide();
+          renderEstimateUI();
+        }
+        if (Object.keys(priceTables).length === 0) {
+          google.script.run
+            .withSuccessHandler(function (tablesJson) {
+              try {
+                priceTables = JSON.parse(tablesJson || '{}');
+                ensure도배필름PriceTablesSplit();
+              } catch (e) {}
+              done();
+            })
+            .withFailureHandler(function () { done(); })
+            .getAllPriceTables();
+        } else {
+          done();
+        }
+      } catch (e) {
+        alert('견적 데이터 처리 오류: ' + (e.message || e));
+      }
+    })
+    .withFailureHandler(function (err) {
+      alert('불러오기 실패: ' + (err && err.message ? err.message : err));
+    })
+    .getEstimateFromSheet(name);
 }
 
 function deleteSavedEstimate(id) {

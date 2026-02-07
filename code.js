@@ -618,6 +618,86 @@ function saveEstimate(estimateData) {
   }
 }
 
+/**
+ * 시트에 저장된 견적 목록 (견적_ 시트가 있는 현장명)
+ * - 반환: JSON 문자열 배열 ["현장A", "현장B", ...]
+ */
+function getEstimateList() {
+  return getScheduleList();
+}
+
+/**
+ * 견적_현장명 시트에서 견적 데이터 읽어서 클라이언트용 JSON 반환
+ * - 반환: JSON 문자열 { siteName, area, items: [...], subtotal, overhead, profit, adjusted, total }
+ */
+function getEstimateFromSheet(siteName) {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return null;
+    var sheetName = '견적_' + sanitizeSheetName_(String(siteName || '').trim());
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return null;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 8) return null;
+    var data = sheet.getRange(1, 1, lastRow, 10).getValues();
+    var siteNameVal = String((data[1] && data[1][1]) ? data[1][1] : siteName).trim();
+    var areaVal = 0;
+    if (data[1] && data[1][3]) {
+      var a = String(data[1][3]).replace(/평/g, '').trim();
+      if (a && !isNaN(Number(a))) areaVal = Number(a);
+    }
+    var headerRowIndex = -1;
+    for (var h = 0; h < Math.min(15, data.length); h++) {
+      if (String(data[h][0] || '').trim() === 'No') { headerRowIndex = h; break; }
+    }
+    if (headerRowIndex < 0) return null;
+    var items = [];
+    var currentCat = null;
+    var subtotal = 0, overhead = 0, profit = 0, adjusted = 0, total = 0;
+    for (var r = headerRowIndex + 1; r < data.length; r++) {
+      var row = data[r];
+      var a = row[0], b = String(row[1] || '').trim(), col9 = String(row[8] || '').trim(), col10 = row[9];
+      if (b.indexOf('■') === 0) {
+        currentCat = b.replace(/^■\s*/, '').trim();
+        continue;
+      }
+      if (b.indexOf(' 소계') !== -1) { currentCat = null; continue; }
+      if (col9 === '소계') { subtotal = Number(col10) || 0; continue; }
+      if (col9.indexOf('공과잡비') !== -1) { overhead = Number(col10) || 0; continue; }
+      if (col9.indexOf('이윤') !== -1) { profit = Number(col10) || 0; continue; }
+      if (col9.indexOf('조정액') !== -1) { adjusted = Number(col10) || 0; continue; }
+      if (col9.indexOf('총액') !== -1) { total = Number(col10) || 0; continue; }
+      if (currentCat && a !== '' && a != null && !isNaN(Number(a))) {
+        items.push({
+          category: currentCat,
+          item: b,
+          spec: String(row[2] || ''),
+          unit: String(row[3] || ''),
+          qty: row[4] != null && row[4] !== '' ? Number(row[4]) : 0,
+          materialPrice: Number(row[5]) || 0,
+          materialAmount: Number(row[6]) || 0,
+          laborPrice: Number(row[7]) || 0,
+          laborAmount: Number(row[8]) || 0,
+          totalAmount: Number(row[9]) || 0
+        });
+      }
+    }
+    var out = {
+      siteName: siteNameVal,
+      area: areaVal,
+      items: items,
+      subtotal: subtotal,
+      overhead: overhead,
+      profit: profit,
+      adjusted: adjusted,
+      total: total
+    };
+    return JSON.stringify(out);
+  } catch (e) {
+    return null;
+  }
+}
+
 // ========================================
 // 일정 관련 함수
 // ========================================
