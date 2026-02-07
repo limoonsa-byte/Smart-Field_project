@@ -40,6 +40,12 @@
     user-select: none;
     margin: 0 !important;
     padding: 0 !important;
+    /* 노치·홈 인디케이터 영역 */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    box-sizing: border-box;
   }
 
   .screen { 
@@ -47,26 +53,50 @@
     width: 100%; 
     height: 100%; 
     position: absolute; 
-    top:0; 
-    left:0; 
+    top: 0; 
+    left: 0; 
     background: #222; 
-    overflow-y: auto; /* ✅ 스크롤 가능 */
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
   }
   .screen.active { display: block; }
 
+  /* 터치 영역 최소 44px (접근성) */
+  .touch-btn { min-height: 44px; min-width: 44px; }
+  .btn-sm.touch-btn { min-height: 38px; }
+
+  /* 메인 화면 버튼 영역 */
+  .main-buttons-wrap { margin-top: 15vh; }
+  .main-buttons { max-width: 420px; margin-left: auto; margin-right: auto; }
+  .main-title { font-size: 1.5rem; }
+  .main-subtitle { font-size: 0.95rem; }
+
+  /* 도면 상단바 */
+  .topbar-site { flex: 1; min-width: 80px; max-width: 160px; }
+  .topbar-height { width: 150px; }
+
+  /* 각 화면 헤더/본문 */
+  .screen-header { z-index: 30; padding-top: env(safe-area-inset-top); }
+  .screen-title { font-size: 1.1rem; }
+  .screen-body { -webkit-overflow-scrolling: touch; overflow-x: hidden; }
+
   #top-bar { 
     position: absolute; 
-    top:0; 
-    left:0; 
-    width:100%; 
-    height:50px; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    min-height: 50px; 
     background: rgba(0,0,0,0.95); 
-    display:flex; 
-    align-items:center; 
-    padding:0 10px; 
-    z-index:50; 
-    border-bottom:1px solid #444; 
+    display: flex; 
+    align-items: center; 
+    padding: 10px; 
+    padding-top: max(10px, env(safe-area-inset-top)); 
+    z-index: 50; 
+    border-bottom: 1px solid #444; 
     gap: 8px;
+    box-sizing: border-box;
   }
 
   #info-overlay { 
@@ -730,18 +760,64 @@
     }
   }
 
-  /* ✅ 태블릿/PC는 그대로 유지 */
+  /* ========== 스마트폰 (세로·작은 화면) ========== */
+  @media (max-width: 576px) {
+    .main-buttons-wrap { margin-top: 10vh; }
+    .main-title { font-size: 1.35rem; }
+    .main-subtitle { font-size: 0.9rem; margin-bottom: 1rem !important; }
+    .main-buttons { max-width: 100%; padding: 0 12px; gap: 10px !important; }
+    .main-buttons .btn-lg { padding: 16px 12px !important; font-size: 1rem !important; min-height: 52px; border-radius: 12px; }
+    .screen-header { padding: 10px 12px !important; }
+    .screen-title { font-size: 1rem; }
+    .screen-body { padding: 12px 10px !important; }
+    #top-bar .topbar-site { max-width: 100%; flex: 1 1 100%; min-width: 0; }
+    #top-bar .topbar-height { width: 110px; }
+    #top-bar .topbar-label { display: inline; }
+    .container-sm { max-width: 100%; }
+    /* 보관함 카드: 1열로 */
+    #list-container .col-6 { flex: 0 0 100%; max-width: 100%; }
+    #list-container .row.g-3 { margin-left: 0; margin-right: 0; }
+    #list-container .card-body { padding: 12px !important; }
+    #list-container canvas { height: 140px !important; }
+    /* 일정 캘린더 셀 작게 */
+    .schedule-day-cell { min-height: 56px; padding: 3px; }
+    .schedule-task-card { font-size: 0.65rem; padding: 2px 4px; }
+    .schedule-weekday-header { font-size: 0.65rem; padding: 4px 2px; }
+    .schedule-calendar-title { font-size: 0.95rem; }
+    .schedule-view-tabs .btn { font-size: 0.85rem; padding: 8px 10px; }
+  }
+
+  /* ========== 태블릿 (768px ~ 1024px) ========== */
+  @media (min-width: 768px) and (max-width: 1024px) {
+    .main-buttons-wrap { margin-top: 12vh; }
+    .main-buttons { max-width: 380px; }
+    .main-buttons .btn-lg { min-height: 52px; }
+    .screen-header { padding: 12px 16px; }
+    .screen-title { font-size: 1.15rem; }
+    #right-controls { width: 130px; top: 62px; right: 10px; }
+    .tool-btn { min-height: 46px; }
+    .tool-btn i { font-size: 18px; }
+    .tool-btn span { font-size: 10px; }
+    #bottom-controls { bottom: 18px; max-width: 520px; }
+    #top-bar .topbar-site { max-width: 180px; }
+    #top-bar .topbar-height { width: 130px; }
+    #list-container .col-md-4 { flex: 0 0 50%; max-width: 50%; }
+    .schedule-day-cell { min-height: 64px; }
+    .schedule-task-card { font-size: 0.68rem; }
+  }
+
+  /* ✅ 태블릿/PC (768px 이상) */
   @media (min-width: 768px) {
     #right-controls { 
-      width: 140px; /* 데스크탑에서도 살짝 작게 */
-      top:65px; 
-      right:12px; 
-      gap:8px; 
+      width: 140px;
+      top: 65px; 
+      right: 12px; 
+      gap: 8px; 
     }
     .tool-btn { min-height: 50px; }
     .tool-btn i { font-size: 20px; }
     .tool-btn span { font-size: 11px; }
-    #btn-pan span{ font-size: 13px; }
+    #btn-pan span { font-size: 13px; }
     #bottom-controls { bottom: 20px; gap: 12px; }
     #bottom-controls button { padding: 16px 12px; font-size: 16px; }
   }
@@ -816,6 +892,26 @@
     border-color:#0d6efd;
     box-shadow:0 0 8px rgba(13,110,253,.5);
   }
+
+  /* ========== 일정 캘린더 뷰 ========== */
+  .schedule-view-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .schedule-view-tabs .btn { flex: 1; max-width: 160px; }
+  .schedule-calendar-wrap { background: #333; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+  .schedule-calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .schedule-calendar-title { font-size: 1.1rem; font-weight: bold; color: #fff; }
+  .schedule-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #555; border: 1px solid #555; border-radius: 6px; overflow: hidden; }
+  .schedule-day-cell { min-height: 72px; background: #2a2a2a; padding: 4px; display: flex; flex-direction: column; align-items: flex-end; }
+  .schedule-day-num { font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; }
+  .schedule-day-num.sunday { color: #e74c3c; }
+  .schedule-day-num.saturday { color: #3498db; }
+  .schedule-day-num.weekday { color: #ddd; }
+  .schedule-day-num.other-month { color: #666; }
+  .schedule-day-num.holiday { color: #f39c12; }
+  .schedule-holiday-label { display: block; font-size: 0.65rem; color: #f39c12; margin-bottom: 2px; }
+  .schedule-task-card { font-size: 0.7rem; padding: 3px 6px; margin-top: 2px; border-radius: 4px; border: 1px solid #555; background: #3a3a3a; color: #eee; text-align: left; display: flex; align-items: flex-start; gap: 4px; }
+  .schedule-task-card::before { content: ''; display: inline-block; width: 4px; height: 4px; min-width: 4px; border-radius: 50%; background: #888; margin-top: 5px; }
+  .schedule-task-card.today { background: rgba(255, 193, 7, 0.25); border-color: #d4a806; }
+  .schedule-weekday-header { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #555; margin-bottom: 0; padding: 6px 4px; text-align: center; font-size: 0.75rem; font-weight: bold; color: #aaa; }
 
   /* PDF 인쇄 시: 버튼·닫기 등 숨김 */
   @media print {

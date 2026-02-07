@@ -14,6 +14,31 @@ let estimateSettings = {
 };
 let drawingList = []; // 도면 목록
 
+// 단가표: 도배필름공사만 있으면 도배공사/필름공사로 나누기 (캐시·로컬 저장 대응)
+function ensure도배필름PriceTablesSplit() {
+  if (!priceTables['도배필름공사'] || !Array.isArray(priceTables['도배필름공사'])) return;
+  if (priceTables['도배공사'] || priceTables['필름공사']) return;
+  const 도배품목 = ['도배', '실크', '친환경도배', '도배 자재비 - 합지', '도배 자재비 - 실크', '도배 자재비 - 디아망', '도배 부자재', '도배 인건비'];
+  const items = priceTables['도배필름공사'];
+  priceTables['도배공사'] = items.filter(function(p) { return 도배품목.indexOf(p.item) !== -1; });
+  priceTables['필름공사'] = items.filter(function(p) { return 도배품목.indexOf(p.item) === -1; });
+  if (priceTables['도배공사'].length === 0 && priceTables['필름공사'].length === 0) {
+    priceTables['도배공사'] = [{ item: '도배', spec: '', unit: '평', materialPrice: 7000, laborPrice: 8000 }];
+    priceTables['필름공사'] = [{ item: '필름', spec: '', unit: 'M', materialPrice: 12000, laborPrice: 10000 }];
+  }
+}
+
+// 구 견적: 도배필름공사 → 도배공사/필름공사 품목 분리
+function migrate도배필름Category(items) {
+  if (!Array.isArray(items)) return items;
+  const 도배품목 = ['도배', '실크', '친환경도배', '도배 자재비 - 합지', '도배 자재비 - 실크', '도배 자재비 - 디아망', '도배 부자재', '도배 인건비'];
+  return items.map(it => {
+    if (it.category !== '도배필름공사') return it;
+    const newCat = 도배품목.indexOf(it.item) !== -1 ? '도배공사' : '필름공사';
+    return Object.assign({}, it, { category: newCat });
+  });
+}
+
 // =========================
 // ✅ 견적서 화면 초기화 (화면 진입 시)
 // =========================
@@ -27,10 +52,10 @@ function initEstimateScreen() {
     try {
       const data = JSON.parse(savedEstimate);
       currentDrawing = data.drawing;
-      estimateItems = data.items;
+      estimateItems = migrate도배필름Category(data.items || []);
       estimateSettings = data.settings;
       priceTables = data.priceTables || {};
-      
+      ensure도배필름PriceTablesSplit();
       // 단가표가 없으면 로드
       if (Object.keys(priceTables).length === 0) {
         loadPriceTables();
@@ -262,7 +287,7 @@ function loadPriceTables() {
 function onPriceTablesLoaded(jsonString) {
   try {
     priceTables = JSON.parse(jsonString);
-    
+    ensure도배필름PriceTablesSplit();
     // UI 렌더링 (수량은 렌더링 시 실시간 계산)
     renderEstimateUI();
   } catch (e) {
@@ -445,7 +470,7 @@ function analyzeDrawing() {
       const pyeong = area / 3.3;
       
       // 도배 (평)
-      addEstimateItem('도배필름공사', '도배', '', '평', pyeong, 7000, 8000);
+      addEstimateItem('도배공사', '도배', '', '평', pyeong, 7000, 8000);
       
       // 바닥공사 (평) - 기본값: 강마루
       addEstimateItem('바닥공사', '강마루', '동화 나투스전', '평', pyeong, 98000, 18000);
@@ -766,10 +791,9 @@ function calculateItemQuantity(category, priceItem, drawing) {
       return bathroomCount > 0 ? bathroomCount : 1;
     }
     
-    // 17-18번: 화장실 개수
-    if (item === '간접 타입 욕실거울' || item === '욕조') {
-      return bathroomCount > 0 ? bathroomCount : 1;
-    }
+    // 17번: 욕실거울 = 화장실 개수 / 18번: 욕조 = 기본 1
+    if (item === '간접 타입 욕실거울') return bathroomCount > 0 ? bathroomCount : 1;
+    if (item === '욕조') return 1;
     
     // 19-20번: 직접 기입 (욕조조적만, 젠다이만들기는 21번에서 처리)
     if (item === '욕조조적') return 1;
@@ -801,29 +825,21 @@ function calculateItemQuantity(category, priceItem, drawing) {
       return bathroomCount > 0 ? bathroomCount : 1;
     }
     
-    // 25-28번: 힘펠환풍기·티오람 미니 = 화장실 개수, 나머지 직접 기입 (가벽, 큐비클, 유리부스, 잡부)
-    if (item === '힘펠천풍기' || item === '티오람 미니') {
+    // 25-28번: 힘펠환풍기·하츠 티오람 미니 환풍기(또는 티오람 미니) = 화장실 개수, 나머지 직접 기입 (가벽, 큐비클, 유리부스, 잡부)
+    if (item === '힘펠천풍기' || item === '티오람 미니' || item === '하츠 티오람 미니 환풍기') {
       return bathroomCount > 0 ? bathroomCount : 1;
     }
     if (item === '가벽' || item === '큐비클' || 
         item === '유리부스' || item === '잡부') return 1;
   }
 
-  // 도배필름공사: 방/주방/안방/거실 바닥 + 벽체 면적 기반
-  if (category === '도배필름공사') {
-    // 바닥: 전체 - 욕실 - 발코니/베란다 - 현관
+  // 도배공사: 방/주방/안방/거실 바닥 + 벽체 면적 기반 (평수)
+  if (category === '도배공사') {
     const flooringArea = totalArea - bathroomArea - verandaArea - entranceArea; // m²
-
-    // 방/주방/안방/거실 둘레 합 (욕실/현관/발코니/베란다 제외)
     let wallPerimeterMm = 0;
     zones.forEach(z => {
       const name = (z.name || '').trim();
-      if (
-        name.startsWith('욕실') ||
-        name.startsWith('현관') ||
-        name.startsWith('발코니') ||
-        name.startsWith('베란다')
-      ) return;
+      if (name.startsWith('욕실') || name.startsWith('현관') || name.startsWith('발코니') || name.startsWith('베란다')) return;
       if (!z.pts || z.pts.length < 2) return;
       for (let i = 0; i < z.pts.length; i++) {
         const p1 = z.pts[i];
@@ -831,58 +847,30 @@ function calculateItemQuantity(category, priceItem, drawing) {
         wallPerimeterMm += Math.hypot(p2.x - p1.x, p2.y - p1.y);
       }
     });
-    const wallPerimeterM = wallPerimeterMm / 1000;       // m
-    const wallHeightM = (Number(height) || 2300) / 1000; // m
-    const wallArea = wallPerimeterM * wallHeightM;       // m²
-
+    const wallPerimeterM = wallPerimeterMm / 1000;
+    const wallHeightM = (Number(height) || 2300) / 1000;
+    const wallArea = wallPerimeterM * wallHeightM;
     const totalM2 = Math.max(0, flooringArea) + Math.max(0, wallArea);
     const totalPyeong = totalM2 / 3.3;
     const roundedPyeong = totalPyeong > 0 ? Math.round(totalPyeong * 100) / 100 : 1;
-
-    // 1~4번: 동일한 평수 사용
-    if (
-      item === '도배 자재비 - 합지' ||
-      item === '도배 자재비 - 실크' ||
-      item === '도배 자재비 - 디아망' ||
-      item === '도배 부자재'
-    ) {
-      return roundedPyeong;
-    }
-
-    // 5번: 도배 인건비 = 1번 평수 / 15 올림
+    if (item === '도배 자재비 - 합지' || item === '도배 자재비 - 실크' || item === '도배 자재비 - 디아망' || item === '도배 부자재') return roundedPyeong;
     if (item === '도배 인건비') {
       const base = totalPyeong > 0 ? totalPyeong : 0;
       const qty = Math.ceil(base / 15);
       return qty > 0 ? qty : 1;
     }
+    return 1;
+  }
 
-    // 문 개수·현관 개수 (6~9번용)
+  // 필름공사: 문/현관 개수 기반 M 수
+  if (category === '필름공사') {
     const doorCount = doors.length || 0;
     const entranceCount = zones.filter(z => (z.name || '').trim().startsWith('현관')).length || 0;
-
-    // 6번: 문필름 재료비 = 문 개수 × 4.5 (M)
-    if (item === '문필름 재료비') {
-      const m = doorCount * 4.5;
-      return m > 0 ? Math.round(m * 100) / 100 : 1;
-    }
-    // 7번: 문+문틀 필름 재료비 = 문 개수 × 7 (M)
-    if (item === '문+문틀 필름 재료비') {
-      const m = doorCount * 7;
-      return m > 0 ? Math.round(m * 100) / 100 : 1;
-    }
-    // 8번: 문틀 필름 재료비 = 문 개수 × 3 (M)
-    if (item === '문틀 필름 재료비') {
-      const m = doorCount * 3;
-      return m > 0 ? Math.round(m * 100) / 100 : 1;
-    }
-    // 9번: 현관 필름 자재비 = 현관 개수 × 3.5 (M)
-    if (item === '현관 필름 자재비') {
-      const m = entranceCount * 3.5;
-      return m > 0 ? Math.round(m * 100) / 100 : 1;
-    }
-    // 10~11번: 직접 입력 (샷시, 싱크 문짝)
+    if (item === '문필름 재료비') { const m = doorCount * 4.5; return m > 0 ? Math.round(m * 100) / 100 : 1; }
+    if (item === '문+문틀 필름 재료비') { const m = doorCount * 7; return m > 0 ? Math.round(m * 100) / 100 : 1; }
+    if (item === '문틀 필름 재료비') { const m = doorCount * 3; return m > 0 ? Math.round(m * 100) / 100 : 1; }
+    if (item === '현관 필름 자재비') { const m = entranceCount * 3.5; return m > 0 ? Math.round(m * 100) / 100 : 1; }
     if (item === '샷시 필름 자재비' || item === '싱크 문짝 필름 자재비') return 1;
-    // 12~13번: 필름 부자재·인건비 = 6~11 체크항목 M합 → sync필름부자재및인건비Qty()에서 설정
     if (item === '필름 부자재' || item === '필름 인건비') return 1;
     return 1;
   }
@@ -1007,11 +995,11 @@ function sync철물Amount() {
   chul.totalAmount = amt;
 }
 
-// 도배필름공사 12·13번: 6~11번 체크된 항목의 M 수 합
-const 도배필름_6부터11_품목명 = ['문필름 재료비', '문+문틀 필름 재료비', '문틀 필름 재료비', '현관 필름 자재비', '샷시 필름 자재비', '싱크 문짝 필름 자재비'];
+// 필름공사: 6~11번 체크된 항목의 M 수 합 → 필름 부자재/인건비 수량
+const 필름_6부터11_품목명 = ['문필름 재료비', '문+문틀 필름 재료비', '문틀 필름 재료비', '현관 필름 자재비', '샷시 필름 자재비', '싱크 문짝 필름 자재비'];
 function get필름부자재및인건비Quantity() {
   const sum = estimateItems
-    .filter(e => e.category === '도배필름공사' && 도배필름_6부터11_품목명.includes(e.item))
+    .filter(e => e.category === '필름공사' && 필름_6부터11_품목명.includes(e.item))
     .reduce((s, e) => s + (Number(e.qty) || 0), 0);
   return Math.round(sum * 100) / 100;
 }
@@ -1019,7 +1007,7 @@ function get필름부자재및인건비Quantity() {
 function sync필름부자재및인건비Qty() {
   const q = get필름부자재및인건비Quantity();
   ['필름 부자재', '필름 인건비'].forEach(itemName => {
-    const row = estimateItems.find(e => e.category === '도배필름공사' && e.item === itemName);
+    const row = estimateItems.find(e => e.category === '필름공사' && e.item === itemName);
     if (!row) return;
     row.qty = q;
     row.materialAmount = Math.round(q * (row.materialPrice || 0));
@@ -1033,7 +1021,7 @@ function sync필름부자재및인건비Qty() {
 // =========================
 function addEstimateItem(category, item, spec, unit, qty, materialPrice, laborPrice) {
   let finalQty;
-  if (category === '도배필름공사' && unit === 'M') {
+  if (category === '필름공사' && unit === 'M') {
     finalQty = Math.round((Number(qty) || 0) * 100) / 100 || 1;
   } else if (category === '설비공사' && item === '단채움') {
     finalQty = (Number(qty) != null && Number(qty) >= 0) ? Math.round(Number(qty) * 10) / 10 : 1; // 소수점 1자리
@@ -1190,7 +1178,7 @@ function loadSavedEstimate(id) {
   }
   const d = found.data;
   currentDrawing = d.drawing || null;
-  estimateItems = Array.isArray(d.items) ? d.items : [];
+  estimateItems = migrate도배필름Category(Array.isArray(d.items) ? d.items : []);
   if (d.settings) {
     estimateSettings.siteName = d.settings.siteName != null ? d.settings.siteName : '';
     estimateSettings.area = d.settings.area != null ? d.settings.area : 0;
@@ -1200,6 +1188,7 @@ function loadSavedEstimate(id) {
   }
   if (d.priceTables && typeof d.priceTables === 'object') {
     priceTables = d.priceTables;
+    ensure도배필름PriceTablesSplit();
   }
   saveCurrentEstimate();
   const modal = bootstrap.Modal.getInstance(document.getElementById('loadEstimateModal'));
@@ -1284,7 +1273,7 @@ function renderEstimateUI() {
   // 공정 순서 정의
   const categoryOrder = [
     '가설철거', '목공사', '전기공사', '설비공사', '화장실공사',
-    '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'
+    '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'
   ];
   
   let html = `
@@ -1402,7 +1391,7 @@ function renderEstimateUI() {
       let calculatedQty = 1; // 기본값
       if (category === '목공사' && priceItem.item === '공구손료') {
         calculatedQty = get공구손료Quantity();
-      } else if (category === '도배필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비')) {
+      } else if (category === '필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비')) {
         calculatedQty = get필름부자재및인건비Quantity();
       } else if (currentDrawing) {
         calculatedQty = calculateItemQuantity(category, priceItem, currentDrawing);
@@ -1410,7 +1399,7 @@ function renderEstimateUI() {
       
       // 체크된 항목이 있으면 저장된 수량 사용, 없으면 계산된 수량 사용 (공구손료·필름 부자재/인건비는 항상 계산값)
       const isChecked = !!estimateItem;
-      const is필름부자재인건비Row = (category === '도배필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비'));
+      const is필름부자재인건비Row = (category === '필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비'));
       const qty = (category === '목공사' && priceItem.item === '공구손료') ? calculatedQty
         : (is필름부자재인건비Row ? calculatedQty : (estimateItem ? estimateItem.qty : calculatedQty));
       const is철물Row = (category === '목공사' && priceItem.item === '철물');
@@ -1622,7 +1611,7 @@ function toggleEstimateItem(category, itemIdx, isChecked) {
     sync공구손료Qty();
     sync철물Amount();
   }
-  if (category === '도배필름공사') sync필름부자재및인건비Qty();
+  if (category === '필름공사') sync필름부자재및인건비Qty();
   
   renderEstimateUI();
   
@@ -1665,19 +1654,19 @@ function updateEstimateItemQty(category, itemIdx, newQty) {
       return;
     }
     // 필름 부자재/인건비는 6~11 체크항목 M합 자동, 수동 변경 불가
-    if (category === '도배필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비')) {
+    if (category === '필름공사' && (priceItem.item === '필름 부자재' || priceItem.item === '필름 인건비')) {
       renderEstimateUI();
       setTimeout(() => window.scrollTo(0, scrollPos), 50);
       return;
     }
-    item.qty = (category === '도배필름공사' && priceItem.unit === 'M') ? (Math.round(qty * 100) / 100 || 1) : (Math.round(qty * 100) / 100);
+    item.qty = (category === '필름공사' && priceItem.unit === 'M') ? (Math.round(qty * 100) / 100 || 1) : (Math.round(qty * 100) / 100);
     item.materialAmount = Math.round(item.qty * item.materialPrice);
     item.laborAmount = Math.round(item.qty * item.laborPrice);
     item.totalAmount = item.materialAmount + item.laborAmount;
     // 목공사 항목 변경 시 공구손료/철물 동기화
     sync공구손료Qty();
     sync철물Amount();
-    if (category === '도배필름공사') sync필름부자재및인건비Qty();
+    if (category === '필름공사') sync필름부자재및인건비Qty();
     renderEstimateUI();
     
     // 스크롤 위치 복원
@@ -1929,7 +1918,7 @@ function saveEstimate() {
 // =========================
 function exportEstimatePDF() {
   const totals = calculateTotals();
-  const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+  const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
   const byCategory = {};
   estimateItems.forEach(function(item) {
     if (!byCategory[item.category]) byCategory[item.category] = [];
@@ -1964,15 +1953,32 @@ function exportEstimatePDF() {
     rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml(cat) + ' 소계</strong></td><td class="text-end"><strong>' + catSum.toLocaleString() + '원</strong></td></tr>';
   });
   
-  // 표지(메인 1페이지): 단위 전체, 수량 전체1 한 줄만
-  const coverRows = '<tr>' +
-    '<td class="text-center">1</td>' +
-    '<td>전체</td>' +
-    '<td class="text-center">전체</td>' +
-    '<td class="text-end">전체1</td>' +
-    '<td class="text-end">' + totals.subtotal.toLocaleString() + '</td>' +
-    '<td></td>' +
-    '</tr>';
+  // 표지(메인 1페이지): 품목 = 공정명만 나열, 단위=식, 수량=1, 재료비·노무비·금액
+  const materialTotal = estimateItems.reduce(function(s, item) { return s + (Number(item.materialAmount) || 0); }, 0);
+  const laborTotal = estimateItems.reduce(function(s, item) { return s + (Number(item.laborAmount) || 0); }, 0);
+  let coverRowNo = 0;
+  let coverRows = '';
+  categoryOrder.forEach(function(cat) {
+    const items = byCategory[cat];
+    if (!items || items.length === 0) return;
+    coverRowNo++;
+    const catSum = items.reduce(function(sum, item) { return sum + (Number(item.totalAmount) || 0); }, 0);
+    const catMaterialSum = items.reduce(function(sum, item) { return sum + (Number(item.materialAmount) || 0); }, 0);
+    const catLaborSum = items.reduce(function(sum, item) { return sum + (Number(item.laborAmount) || 0); }, 0);
+    coverRows += '<tr>' +
+      '<td class="text-center">' + coverRowNo + '</td>' +
+      '<td>' + escapeHtml(cat) + '</td>' +
+      '<td class="text-center">식</td>' +
+      '<td class="text-end">1</td>' +
+      '<td class="text-end">' + catMaterialSum.toLocaleString() + '</td>' +
+      '<td class="text-end">' + catLaborSum.toLocaleString() + '</td>' +
+      '<td class="text-end">' + catSum.toLocaleString() + '</td>' +
+      '<td></td>' +
+      '</tr>';
+  });
+  if (!coverRows) {
+    coverRows = '<tr><td class="text-center">1</td><td>-</td><td class="text-center">식</td><td class="text-end">1</td><td class="text-end">0</td><td class="text-end">0</td><td class="text-end">0</td><td></td></tr>';
+  }
   
   // 작성일 포맷
   const now = new Date();
@@ -2086,38 +2092,50 @@ function exportEstimatePDF() {
   <table class="cover-table">
     <thead>
       <tr>
-        <th style="width: 8%;">순번</th>
-        <th style="width: 40%;">품목</th>
-        <th style="width: 10%;">단위</th>
-        <th style="width: 10%;">수량</th>
-        <th style="width: 20%;">금액</th>
-        <th style="width: 12%;">비고</th>
+        <th style="width: 6%;">순번</th>
+        <th style="width: 24%;">품목</th>
+        <th style="width: 6%;">단위</th>
+        <th style="width: 6%;">수량</th>
+        <th style="width: 18%;">재료비</th>
+        <th style="width: 18%;">노무비</th>
+        <th style="width: 16%;">금액</th>
+        <th style="width: 6%;">비고</th>
       </tr>
     </thead>
     <tbody>
       ${coverRows}
       <tr>
         <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">소계</td>
+        <td class="text-end">${materialTotal.toLocaleString()}</td>
+        <td class="text-end">${laborTotal.toLocaleString()}</td>
         <td class="text-end">${totals.subtotal.toLocaleString()}</td>
         <td></td>
       </tr>
       <tr>
         <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">공과잡비(5%)</td>
+        <td></td>
+        <td></td>
         <td class="text-end">${totals.overhead.toLocaleString()}</td>
         <td></td>
       </tr>
       <tr>
         <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">이윤(10%)</td>
+        <td></td>
+        <td></td>
         <td class="text-end">${totals.profit.toLocaleString()}</td>
         <td></td>
       </tr>
       <tr>
         <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">조정액</td>
+        <td></td>
+        <td></td>
         <td class="text-end">${totals.adjusted.toLocaleString()}</td>
         <td></td>
       </tr>
       <tr class="cover-total-row">
         <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;"><strong>총액 (VAT 별도)</strong></td>
+        <td></td>
+        <td></td>
         <td class="text-end"><strong>${totals.total.toLocaleString()}원</strong></td>
         <td></td>
       </tr>
@@ -2173,7 +2191,7 @@ function escapeHtml(s) {
 function exportEstimateExcel() {
   const totals = calculateTotals();
   const BOM = '\uFEFF';
-  const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+  const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
   const byCategory = {};
   estimateItems.forEach(function(item) {
     if (!byCategory[item.category]) byCategory[item.category] = [];

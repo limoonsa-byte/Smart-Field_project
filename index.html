@@ -122,21 +122,24 @@
 
 <!-- 메인 -->
 <div id="screen-main" class="screen active">
-  <div class="container text-center" style="margin-top: 15vh;">
-    <h1 class="fw-bold text-white mb-2">스마트 현장관리 <span class="badge bg-primary">V6.1</span></h1>
-    <p class="text-secondary mb-5">도면 → 보관 → 견적까지 한 번에</p>
+  <div class="container text-center main-buttons-wrap">
+    <h1 class="fw-bold text-white mb-2 main-title">스마트 현장관리 <span class="badge bg-primary">V6.1</span></h1>
+    <p class="text-secondary mb-4 mb-md-5 main-subtitle">도면 → 보관 → 견적까지 한 번에</p>
 
-    <div class="d-grid gap-3 col-10 mx-auto" style="max-width: 420px;">
-      <button class="btn btn-primary btn-lg py-3 fw-bold shadow" onclick="goScreen('draw')">
+    <div class="d-grid gap-3 main-buttons">
+      <button type="button" class="btn btn-primary btn-lg py-3 fw-bold shadow touch-btn" onclick="goScreen('draw')">
         <i class="bi bi-pencil-square me-2"></i> 도면 그리기
       </button>
-      <button class="btn btn-success btn-lg py-3 fw-bold shadow" onclick="goScreen('list')">
+      <button type="button" class="btn btn-success btn-lg py-3 fw-bold shadow touch-btn" onclick="goScreen('list')">
         <i class="bi bi-folder2-open me-2"></i> 도면 보관함
       </button>
-      <button class="btn btn-info btn-lg py-3 fw-bold shadow text-white" onclick="goScreen('estimate')">
+      <button type="button" class="btn btn-info btn-lg py-3 fw-bold shadow text-white touch-btn" onclick="goScreen('estimate')">
         <i class="bi bi-calculator me-2"></i> 견적 내기
       </button>
-      <button class="btn btn-warning btn-lg py-3 fw-bold shadow" onclick="goScreen('settings')">
+      <button type="button" class="btn btn-secondary btn-lg py-3 fw-bold shadow touch-btn" onclick="goScreen('schedule')">
+        <i class="bi bi-calendar3 me-2"></i> 일정
+      </button>
+      <button type="button" class="btn btn-warning btn-lg py-3 fw-bold shadow touch-btn" onclick="goScreen('settings')">
         <i class="bi bi-gear-fill me-2"></i> 관리자 세팅
       </button>
     </div>
@@ -145,15 +148,13 @@
 
 <!-- 도면 그리기 -->
 <div id="screen-draw" class="screen">
-  <div id="top-bar">
-    <button class="btn btn-secondary btn-sm" onclick="goScreen('main')">
-      <i class="bi bi-house"></i> 홈
+  <div id="top-bar" class="d-flex align-items-center flex-wrap">
+    <button type="button" class="btn btn-secondary btn-sm touch-btn" onclick="goScreen('main')">
+      <i class="bi bi-house"></i> <span class="topbar-label">홈</span>
     </button>
-
-    <input type="text" id="siteName" class="form-control form-control-sm"
-           style="flex: 1; max-width: 160px;" placeholder="현장명 (필수)" required>
-
-    <div class="input-group input-group-sm" style="width: 150px;">
+    <input type="text" id="siteName" class="form-control form-control-sm topbar-site"
+           placeholder="현장명 (필수)" required>
+    <div class="input-group input-group-sm topbar-height">
       <span class="input-group-text bg-secondary text-white border-secondary">H</span>
       <input type="number" id="wallHeight" class="form-control bg-dark text-white border-secondary" value="2300">
     </div>
@@ -330,32 +331,45 @@
 
 <!-- 보관함 -->
 <div id="screen-list" class="screen">
-  <div class="bg-dark p-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center">
-    <button class="btn btn-secondary btn-sm" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
-    <h5 class="text-white m-0 fw-bold">도면 보관함</h5>
-    <div style="width:60px;"></div>
+  <div class="screen-header bg-dark p-2 p-md-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <button type="button" class="btn btn-secondary btn-sm touch-btn" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
+    <h5 class="text-white m-0 fw-bold screen-title">도면 보관함</h5>
+    <div class="d-flex gap-1 flex-wrap justify-content-end">
+      <button type="button" class="btn btn-outline-warning btn-sm touch-btn" onclick="if(window.cleanupUnconnectedDrawings) window.cleanupUnconnectedDrawings();" title="현장별 최신 1건만 남기고 중복·오래된 행 삭제">연결 정리</button>
+      <button type="button" class="btn btn-outline-light btn-sm touch-btn" onclick="if(window.checkDrawingStorageConnection) window.checkDrawingStorageConnection();">연결 확인</button>
+    </div>
   </div>
-  <div class="container py-3" id="list-container"></div>
+  <div class="container-fluid container-sm py-3 px-2 px-sm-3 list-body" id="list-container"></div>
 </div>
 
 <!-- 견적 -->
 <div id="screen-estimate" class="screen">
-  <div class="bg-dark p-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center">
-    <button class="btn btn-secondary btn-sm" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
-    <h5 class="text-white m-0 fw-bold">견적 내기</h5>
-    <div style="width:60px;"></div>
+  <div class="screen-header bg-dark p-2 p-md-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <button type="button" class="btn btn-secondary btn-sm touch-btn" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
+    <h5 class="text-white m-0 fw-bold screen-title"><i class="bi bi-calculator me-1"></i>견적 내기</h5>
+    <div class="invisible btn btn-sm">홈</div>
   </div>
-  <div class="container py-3" id="estimate-container"></div>
+  <div class="container-fluid container-sm py-3 px-2 px-sm-3 screen-body" id="estimate-container"></div>
+</div>
+
+<!-- 일정 -->
+<div id="screen-schedule" class="screen">
+  <div class="screen-header bg-dark p-2 p-md-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <button type="button" class="btn btn-secondary btn-sm touch-btn" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
+    <h5 class="text-white m-0 fw-bold screen-title"><i class="bi bi-calendar3 me-1"></i>일정</h5>
+    <div class="invisible btn btn-sm">홈</div>
+  </div>
+  <div class="container-fluid container-sm py-3 px-2 px-sm-3 screen-body" id="schedule-container"></div>
 </div>
 
 <!-- 관리자 세팅 -->
 <div id="screen-settings" class="screen">
-  <div class="bg-dark p-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center">
-    <button class="btn btn-secondary btn-sm" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
-    <h5 class="text-white m-0 fw-bold"><i class="bi bi-gear-fill"></i> 관리자 세팅</h5>
-    <div style="width:60px;"></div>
+  <div class="screen-header bg-dark p-2 p-md-3 sticky-top border-bottom border-secondary d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <button type="button" class="btn btn-secondary btn-sm touch-btn" onclick="goScreen('main')"><i class="bi bi-house"></i> 홈</button>
+    <h5 class="text-white m-0 fw-bold screen-title"><i class="bi bi-gear-fill me-1"></i>관리자 세팅</h5>
+    <div class="invisible btn btn-sm">홈</div>
   </div>
-  <div class="container py-3" id="settings-container"></div>
+  <div class="container-fluid container-sm py-3 px-2 px-sm-3 screen-body" id="settings-container"></div>
 </div>
 
 <!-- 스크립트 -->
@@ -365,6 +379,7 @@
 <?!= include('js_drawing'); ?>
 <?!= include('js_history'); ?>
 <?!= include('js_estimate'); ?>
+<?!= include('js_schedule'); ?>
 <?!= include('js_settings'); ?>
 
 </body>

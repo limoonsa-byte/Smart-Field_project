@@ -1,0 +1,675 @@
+<script>
+// =========================
+// 일정 화면 (견적 연동 현장별)
+// =========================
+var SCHEDULE_CATEGORY_ORDER = ['가설철거', '설비공사', '목공사', '필름공사', '화장실공사', '전기공사', '도기시공', '도배공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사'];
+
+var currentScheduleSiteName = '';
+var currentScheduleRows = [];
+var currentLaborByCategory = {};
+var currentMaterialByCategory = {};
+var scheduleCalendarYear = 0;
+var scheduleCalendarMonth = 0;
+var DEFAULT_DAILY_LABOR = 250000;
+// 가설철거: 통상 노무비에서 40만원 차감 후, 일당 25만원(하루 3인 기준)으로 일수 계산
+var GASOL_차감 = 400000;
+var GASOL_일당_3인 = 250000;
+// 목공사: 측정 노무비 35만원 단위, 노무비÷35만 소수점 올림 = 인수, 하루 2인(1인 남으면 일수에 포함 안 함)
+var 목공사_측정단가 = 350000;
+var 목공사_하루인원 = 2;
+// 필름공사: 노무비÷28만 = 인수, 하루 2인(남는 인원 일수에 포함 안 함)
+var 필름_측정단가 = 280000;
+var 필름_하루인원 = 2;
+// 화장실공사: 노무비÷28만 = 인수, 하루 3명(1인 남으면 없음, 2인 남으면 일수 추가)
+var 화장실_측정단가 = 280000;
+var 화장실_하루인원 = 3;
+// 도배공사: 노무비÷28만 = 인수, 하루 2인(1인 남으면 일수 포함 안 함)
+var 도배_측정단가 = 280000;
+var 도배_하루인원 = 2;
+
+// 토·일 제외 평일만 공사일로 계산 (휴일 미반영 구버전)
+function addWorkingDays(start, n) {
+  if (n <= 0) return new Date(start.getTime());
+  var d = new Date(start.getTime());
+  var count = 0;
+  while (count < n) {
+    if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+    if (count < n) d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+function nextWorkingDay(d) {
+  var next = new Date(d.getTime());
+  next.setDate(next.getDate() + 1);
+  while (next.getDay() === 0 || next.getDay() === 6) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+// 휴일(holidays) 포함 제외: 공사일 = 주말 아님 + 휴일 아님
+function isWorkingDay(d, holidays) {
+  if (d.getDay() === 0 || d.getDay() === 6) return false;
+  if (holidays && holidays[formatDateYMD(d)]) return false;
+  return true;
+}
+function addWorkingDaysExcludingHolidays(start, n, holidays) {
+  if (n <= 0) return new Date(start.getTime());
+  var d = new Date(start.getTime());
+  var count = 0;
+  while (count < n) {
+    if (isWorkingDay(d, holidays)) count++;
+    if (count < n) d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+function nextWorkingDayExcludingHolidays(d, holidays) {
+  var next = new Date(d.getTime());
+  next.setDate(next.getDate() + 1);
+  while (!isWorkingDay(next, holidays)) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+// =========================
+// 일정 화면 초기화
+// =========================
+function loadScheduleScreen() {
+  var container = document.getElementById('schedule-container');
+  if (!container) return;
+
+  if (!window.google || !google.script || !google.script.run) {
+    container.innerHTML = '<div class="text-white text-center mt-5">테스트 모드: 서버 연결 없음</div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="text-white text-center mt-5">로딩 중...</div>';
+
+  google.script.run
+    .withSuccessHandler(function(jsonList) {
+      var list = [];
+      try { list = JSON.parse(jsonList || '[]'); } catch (e) { list = []; }
+      renderScheduleSiteSelector(container, list);
+    })
+    .withFailureHandler(function(err) {
+      container.innerHTML = '<div class="text-danger text-center mt-5">현장 목록 불러오기 실패</div>';
+    })
+    .getScheduleList();
+}
+
+// 현장 선택 UI + 선택 시 일정 테이블 로드
+function renderScheduleSiteSelector(container, siteList) {
+  if (!siteList || siteList.length === 0) {
+    container.innerHTML = '<p class="text-secondary">견적을 서버에 저장한 현장이 없습니다. 견적 내기에서 견적을 작성한 뒤 "서버 저장"을 하면 여기서 현장을 선택할 수 있습니다.</p>';
+    return;
+  }
+
+  var html = '<div class="mb-4">' +
+    '<label class="form-label text-white">현장 선택 (견적 저장한 현장)</label>' +
+    '<div class="d-flex gap-2 flex-wrap align-items-center">' +
+    '<select id="schedule-site-select" class="form-select form-select-lg bg-dark text-white border-secondary" style="max-width: 280px;">' +
+    '<option value="">-- 현장을 선택하세요 --</option>';
+  for (var i = 0; i < siteList.length; i++) {
+    html += '<option value="' + escapeHtml(siteList[i]) + '">' + escapeHtml(siteList[i]) + '</option>';
+  }
+  html += '</select>' +
+    '<button type="button" class="btn btn-primary" onclick="loadScheduleForSelectedSite()"><i class="bi bi-arrow-down-circle"></i> 불러오기</button>' +
+    '</div></div>' +
+    '<div id="schedule-table-wrap"></div>';
+
+  container.innerHTML = html;
+
+  var sel = document.getElementById('schedule-site-select');
+  if (sel) {
+    sel.addEventListener('change', function() {
+      var site = (sel.value || '').trim();
+      if (site) loadScheduleForSelectedSite();
+    });
+  }
+}
+
+function loadScheduleForSelectedSite() {
+  var sel = document.getElementById('schedule-site-select');
+  var wrap = document.getElementById('schedule-table-wrap');
+  if (!sel || !wrap) return;
+  var siteName = (sel.value || '').trim();
+  if (!siteName) {
+    wrap.innerHTML = '<p class="text-secondary">현장을 선택한 뒤 불러오기를 누르세요.</p>';
+    return;
+  }
+
+  currentScheduleSiteName = siteName;
+  wrap.innerHTML = '<div class="text-white text-center py-4">일정·견적 불러오는 중...</div>';
+
+  google.script.run
+    .withSuccessHandler(function(jsonPayload) {
+      var saved = [];
+      var labor = {};
+      var material = {};
+      try {
+        var payload = JSON.parse(jsonPayload || '{}');
+        saved = payload.schedule || [];
+        labor = payload.labor || {};
+        material = payload.material || {};
+      } catch (e) {}
+      currentScheduleRows = saved;
+      currentLaborByCategory = labor;
+      currentMaterialByCategory = material;
+      var now = new Date();
+      scheduleCalendarYear = now.getFullYear();
+      scheduleCalendarMonth = now.getMonth() + 1;
+      renderScheduleTable(wrap, siteName, saved, { startDate: '' });
+    })
+    .withFailureHandler(function() {
+      wrap.innerHTML = '<div class="text-danger">일정 불러오기 실패</div>';
+    })
+    .getScheduleWithLaborAndMaterial(siteName);
+}
+
+// 상단: 규칙(착공일 + 자동계산/저장) → 공정별 노무비 요약, 하단: 캘린더. options: { startDate }
+function renderScheduleTable(wrap, siteName, savedRows, options) {
+  options = options || {};
+  var startDateVal = (options.startDate || '').trim();
+
+  var laborRows = '';
+  var laborTotal = 0;
+  var materialTotal = 0;
+  for (var c = 0; c < SCHEDULE_CATEGORY_ORDER.length; c++) {
+    var cat = SCHEDULE_CATEGORY_ORDER[c];
+    var labor = currentLaborByCategory[cat] || 0;
+    var material = currentMaterialByCategory[cat] || 0;
+    var sum = material + labor;
+    laborTotal += labor;
+    materialTotal += material;
+    laborRows += '<tr><td>' + escapeHtml(cat) + '</td><td class="text-end">' + (material > 0 ? Number(material).toLocaleString() + '원' : '-') + '</td><td class="text-end">' + (labor > 0 ? Number(labor).toLocaleString() + '원' : '-') + '</td><td class="text-end">' + (sum > 0 ? Number(sum).toLocaleString() + '원' : '-') + '</td></tr>';
+  }
+  var totalSum = materialTotal + laborTotal;
+  var laborHint = (laborTotal <= 0 && materialTotal <= 0) ? '<p class="text-warning small mb-0 mt-2">노무비·재료비가 없으면 견적 내기에서 해당 현장으로 견적 작성 후 <strong>서버 저장</strong>을 한 뒤 다시 불러오세요.</p>' : '';
+  var laborBlock = '<div class="mb-3 p-3 bg-dark border border-secondary rounded">' +
+    '<label class="form-label text-white small mb-2">공정별 재료비·노무비 (견적서 기준)</label>' +
+    '<table class="table table-dark table-bordered table-sm mb-0">' +
+    '<thead><tr><th>공정</th><th class="text-end">재료비</th><th class="text-end">노무비</th><th class="text-end">합계</th></tr></thead><tbody>' +
+    laborRows +
+    '<tr class="table-secondary"><td class="fw-bold">합계</td><td class="text-end fw-bold">' + Number(materialTotal).toLocaleString() + '원</td><td class="text-end fw-bold">' + Number(laborTotal).toLocaleString() + '원</td><td class="text-end fw-bold">' + Number(totalSum).toLocaleString() + '원</td></tr></tbody></table>' +
+    laborHint + '</div>';
+
+  var ruleBlock = '<div class="mb-3 p-3 bg-dark border border-secondary rounded">' +
+    '<label class="form-label text-white small">규칙: 착공일 입력 후 일정 자동 계산</label>' +
+    '<div class="d-flex flex-wrap gap-2 align-items-center">' +
+    '<input type="date" id="schedule-start-date" class="form-control form-control-sm bg-secondary text-white border-secondary" style="max-width:160px;" value="' + escapeHtml(startDateVal) + '">' +
+    '<button type="button" class="btn btn-primary btn-sm" onclick="runScheduleAutoCalc()"><i class="bi bi-calculator"></i> 일정 자동 계산</button>' +
+    '<button type="button" class="btn btn-success btn-sm" onclick="saveScheduleFromForm()"><i class="bi bi-check2-square"></i> 일정 저장</button>' +
+    '<button type="button" class="btn btn-outline-info btn-sm" onclick="schedulePrintPdf()"><i class="bi bi-file-pdf"></i> PDF 보기</button>' +
+    '<button type="button" class="btn btn-outline-warning btn-sm" onclick="scheduleEstimatePdf()"><i class="bi bi-file-earmark-text"></i> 견적+일정 PDF</button>' +
+    '</div></div>';
+
+  var html = '<div class="mb-3"><h5 class="text-white">' + escapeHtml(siteName) + ' 일정</h5></div>' +
+    ruleBlock +
+    laborBlock +
+    '<div id="schedule-calendar-area"></div>';
+
+  wrap.innerHTML = html;
+
+  var calArea = document.getElementById('schedule-calendar-area');
+  if (calArea) renderScheduleCalendar(calArea, siteName, savedRows);
+}
+
+function runScheduleAutoCalc() {
+  var startInput = document.getElementById('schedule-start-date');
+  if (!startInput) return;
+  var startDateStr = (startInput.value || '').trim();
+  if (!startDateStr) {
+    alert('착공일을 선택해 주세요.');
+    return;
+  }
+  var dailyLabor = DEFAULT_DAILY_LABOR;
+
+  var computed = [];
+  var cur = parseDateYMD(startDateStr);
+  if (!cur) {
+    alert('올바른 착공일을 입력해 주세요.');
+    return;
+  }
+  var startYear = cur.getFullYear();
+  var holidays = Object.assign({}, getKoreanHolidays(startYear), getKoreanHolidays(startYear + 1));
+  if (!isWorkingDay(cur, holidays)) {
+    cur = nextWorkingDayExcludingHolidays(cur, holidays);
+  }
+
+  for (var i = 0; i < SCHEDULE_CATEGORY_ORDER.length; i++) {
+    var cat = SCHEDULE_CATEGORY_ORDER[i];
+    var labor = currentLaborByCategory[cat] || 0;
+    var days;
+    if (cat === '설비공사') {
+      var 가설마지막 = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '가설철거') {
+          가설마지막 = computed[j].endDate;
+          break;
+        }
+      }
+      if (가설마지막) {
+        computed.push({ category: '설비공사', startDate: 가설마지막, endDate: 가설마지막, memo: '' });
+      } else {
+        computed.push({ category: '설비공사', startDate: formatDateYMD(cur), endDate: formatDateYMD(cur), memo: '' });
+        cur = nextWorkingDayExcludingHolidays(cur, holidays);
+      }
+      continue;
+    }
+    if (cat === '전기공사') {
+      var 화장실EndFor욕실 = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '화장실공사') {
+          화장실EndFor욕실 = computed[j].endDate;
+          break;
+        }
+      }
+      if (화장실EndFor욕실) {
+        computed.push({ category: '욕실천장시공', startDate: 화장실EndFor욕실, endDate: 화장실EndFor욕실, memo: '' });
+      }
+      var 목공사Start = null, 목공사End = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '목공사') {
+          목공사Start = computed[j].startDate;
+          목공사End = computed[j].endDate;
+          break;
+        }
+      }
+      if (목공사Start && 목공사End) {
+        computed.push({ category: '전기공사', startDate: 목공사Start, endDate: 목공사Start, memo: '' });
+        computed.push({ category: '전기공사', startDate: 목공사End, endDate: 목공사End, memo: '' });
+        cur = nextWorkingDayExcludingHolidays(parseDateYMD(목공사End), holidays);
+      } else {
+        computed.push({ category: '전기공사', startDate: formatDateYMD(cur), endDate: formatDateYMD(cur), memo: '' });
+        cur = nextWorkingDayExcludingHolidays(cur, holidays);
+      }
+      continue;
+    }
+    if (cat === '도기시공') {
+      var 화장실End = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '화장실공사') {
+          화장실End = computed[j].endDate;
+          break;
+        }
+      }
+      if (화장실End) {
+        var 욕실천장일자 = nextWorkingDayExcludingHolidays(parseDateYMD(화장실End), holidays);
+        var dayStr = formatDateYMD(욕실천장일자);
+        computed.push({ category: '도기시공', startDate: dayStr, endDate: dayStr, memo: '' });
+        cur = nextWorkingDayExcludingHolidays(욕실천장일자, holidays);
+      } else {
+        computed.push({ category: '도기시공', startDate: formatDateYMD(cur), endDate: formatDateYMD(cur), memo: '' });
+        cur = nextWorkingDayExcludingHolidays(cur, holidays);
+      }
+      continue;
+    }
+    if (cat === '바닥공사') {
+      var 도배End = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '도배공사') {
+          도배End = computed[j].endDate;
+          break;
+        }
+      }
+      if (도배End) {
+        var 바닥일자 = nextWorkingDayExcludingHolidays(parseDateYMD(도배End), holidays);
+        var dayStr = formatDateYMD(바닥일자);
+        computed.push({ category: '바닥공사', startDate: dayStr, endDate: dayStr, memo: '' });
+        cur = nextWorkingDayExcludingHolidays(parseDateYMD(dayStr), holidays);
+      } else {
+        computed.push({ category: '바닥공사', startDate: formatDateYMD(cur), endDate: formatDateYMD(cur), memo: '' });
+        cur = nextWorkingDayExcludingHolidays(cur, holidays);
+      }
+      continue;
+    }
+    if (cat === '도장공사') {
+      var 싱크End = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '싱크가구공사') {
+          싱크End = computed[j].endDate;
+          break;
+        }
+      }
+      if (싱크End) {
+        var 전기추가일 = nextWorkingDayExcludingHolidays(parseDateYMD(싱크End), holidays);
+        computed.push({ category: '전기공사', startDate: formatDateYMD(전기추가일), endDate: formatDateYMD(전기추가일), memo: '' });
+        cur = nextWorkingDayExcludingHolidays(전기추가일, holidays);
+      }
+      var 화장실End = null;
+      for (var j = 0; j < computed.length; j++) {
+        if (computed[j].category === '화장실공사') {
+          화장실End = computed[j].endDate;
+          break;
+        }
+      }
+      if (화장실End) {
+        var 욕실천장일자 = nextWorkingDayExcludingHolidays(parseDateYMD(화장실End), holidays);
+        var dayStr = formatDateYMD(욕실천장일자);
+        computed.push({ category: '도장공사', startDate: dayStr, endDate: dayStr, memo: '' });
+      }
+    }
+    if (cat === '가설철거') {
+      var effectiveLabor = Math.max(0, labor - GASOL_차감);
+      var 인수 = effectiveLabor / GASOL_일당_3인;
+      days = Math.max(1, Math.floor(인수 / 3));
+    } else if (cat === '목공사') {
+      var 인수 = Math.ceil(labor / 목공사_측정단가);
+      days = Math.floor(인수 / 목공사_하루인원);
+    } else if (cat === '필름공사') {
+      var 인수 = Math.floor(labor / 필름_측정단가);
+      days = Math.floor(인수 / 필름_하루인원);
+    } else if (cat === '화장실공사') {
+      var 인수 = Math.ceil(labor / 화장실_측정단가);
+      var base = Math.floor(인수 / 화장실_하루인원);
+      var rem = 인수 % 화장실_하루인원;
+      days = base + (rem >= 2 ? 1 : 0);
+    } else if (cat === '도배공사') {
+      var 인수 = Math.ceil(labor / 도배_측정단가);
+      days = Math.floor(인수 / 도배_하루인원);
+    } else if (cat === '싱크가구공사') {
+      var material = currentMaterialByCategory[cat] || 0;
+      var sum = (currentLaborByCategory[cat] || 0) + material;
+      days = (sum <= 3000000) ? 1 : 2;
+    } else if (cat === '도장공사') {
+      days = Math.max(0, Math.ceil(labor / dailyLabor) - 1);
+    } else if (cat === '금속유리공사') {
+      days = Math.max(0, Math.ceil(labor / dailyLabor) - 1);
+    } else {
+      days = Math.max(1, Math.ceil(labor / dailyLabor));
+    }
+    if ((cat === '목공사' || cat === '필름공사' || cat === '화장실공사' || cat === '도배공사' || cat === '도장공사' || cat === '금속유리공사') && days <= 0) {
+      continue;
+    }
+    var startStr = formatDateYMD(cur);
+    var endDate = addWorkingDaysExcludingHolidays(cur, Math.max(0, days), holidays);
+    var endStr = formatDateYMD(endDate);
+    computed.push({ category: cat, startDate: startStr, endDate: endStr, memo: '' });
+    cur = nextWorkingDayExcludingHolidays(endDate, holidays);
+  }
+
+  var 전기마지막 = null;
+  for (var j = 0; j < computed.length; j++) {
+    if (computed[j].category === '전기공사') {
+      var ed = computed[j].endDate;
+      if (!전기마지막 || (ed && ed > 전기마지막)) 전기마지막 = ed;
+    }
+  }
+  if (전기마지막) {
+    var 청소실리콘일 = nextWorkingDayExcludingHolidays(parseDateYMD(전기마지막), holidays);
+    computed.push({ category: '청소, 실리콘', startDate: formatDateYMD(청소실리콘일), endDate: formatDateYMD(청소실리콘일), memo: '' });
+    var 현장점검일 = nextWorkingDayExcludingHolidays(청소실리콘일, holidays);
+    computed.push({ category: '현장점검', startDate: formatDateYMD(현장점검일), endDate: formatDateYMD(현장점검일), memo: '' });
+  }
+
+  currentScheduleRows = computed;
+  var calArea = document.getElementById('schedule-calendar-area');
+  if (calArea) renderScheduleCalendar(calArea, currentScheduleSiteName, currentScheduleRows);
+}
+
+function renderScheduleCalendar(container, siteName, rows) {
+  var y = scheduleCalendarYear;
+  var m = scheduleCalendarMonth;
+  var first = new Date(y, m - 1, 1);
+  var last = new Date(y, m - 1 + 1, 0);
+  var firstDay = first.getDay();
+  var daysInMonth = last.getDate();
+  var todayStr = formatDateYMD(new Date());
+
+  var weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+  var headerHtml = '<div class="schedule-weekday-header">';
+  for (var w = 0; w < 7; w++) {
+    headerHtml += '<span>' + weekdays[w] + '</span>';
+  }
+  headerHtml += '</div>';
+
+  var holidays = Object.assign({}, getKoreanHolidays(y), m === 1 ? getKoreanHolidays(y - 1) : {}, m === 12 ? getKoreanHolidays(y + 1) : {});
+  var gridHtml = '<div class="schedule-calendar-grid">';
+  var pad = firstDay;
+  for (var p = 0; p < pad; p++) {
+    var prevDate = new Date(y, m - 1, -pad + p + 1);
+    gridHtml += renderDayCell(prevDate, [], todayStr, true, holidays);
+  }
+  for (var d = 1; d <= daysInMonth; d++) {
+    var date = new Date(y, m - 1, d);
+    var dayStr = formatDateYMD(date);
+    var tasks = getTasksForDay(rows, dayStr, holidays);
+    gridHtml += renderDayCell(date, tasks, todayStr, false, holidays);
+  }
+  var remaining = 42 - (pad + daysInMonth);
+  if (remaining < 0) remaining = 0;
+  var nextMonthStart = new Date(y, m, 1);
+  var scheduleEndNextMonth = null;
+  for (var i = 0; i < (rows || []).length; i++) {
+    var endStr = (rows[i].endDate || rows[i].startDate || '').trim();
+    if (!endStr) continue;
+    var endDt = parseDateYMD(endStr);
+    if (endDt && endDt.getTime() >= nextMonthStart.getTime()) {
+      if (!scheduleEndNextMonth || endDt > scheduleEndNextMonth) scheduleEndNextMonth = endDt;
+    }
+  }
+  if (scheduleEndNextMonth && scheduleEndNextMonth.getFullYear() === nextMonthStart.getFullYear() && scheduleEndNextMonth.getMonth() === nextMonthStart.getMonth()) {
+    var needDays = scheduleEndNextMonth.getDate();
+    if (needDays > remaining) remaining = needDays;
+  }
+  var holidaysForNext = holidays;
+  if (m === 12) {
+    holidaysForNext = Object.assign({}, holidays, getKoreanHolidays(y + 1));
+  }
+  for (var r = 0; r < remaining; r++) {
+    var nextDate = new Date(y, m, r + 1);
+    var nextDayStr = formatDateYMD(nextDate);
+    var nextTasks = getTasksForDay(rows, nextDayStr, holidaysForNext);
+    gridHtml += renderDayCell(nextDate, nextTasks, todayStr, true, holidaysForNext);
+  }
+  gridHtml += '</div>';
+
+  var prevM = m === 1 ? 12 : m - 1;
+  var prevY = m === 1 ? y - 1 : y;
+  var nextM = m === 12 ? 1 : m + 1;
+  var nextY = m === 12 ? y + 1 : y;
+
+  var titleHtml = '<div class="schedule-calendar-header">' +
+    '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="scheduleCalendarPrevMonth()">&lt; 이전</button>' +
+    '<span class="schedule-calendar-title">' + y + '년 ' + m + '월</span>' +
+    '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="scheduleCalendarNextMonth()">다음 &gt;</button>' +
+    '</div>';
+
+  container.innerHTML = '<div class="schedule-calendar-wrap">' + titleHtml + headerHtml + gridHtml + '</div>';
+}
+
+function scheduleCalendarPrevMonth() {
+  if (scheduleCalendarMonth === 1) {
+    scheduleCalendarYear--;
+    scheduleCalendarMonth = 12;
+  } else {
+    scheduleCalendarMonth--;
+  }
+  var calArea = document.getElementById('schedule-calendar-area');
+  if (calArea) renderScheduleCalendar(calArea, currentScheduleSiteName, currentScheduleRows);
+}
+
+function scheduleCalendarNextMonth() {
+  if (scheduleCalendarMonth === 12) {
+    scheduleCalendarYear++;
+    scheduleCalendarMonth = 1;
+  } else {
+    scheduleCalendarMonth++;
+  }
+  var calArea = document.getElementById('schedule-calendar-area');
+  if (calArea) renderScheduleCalendar(calArea, currentScheduleSiteName, currentScheduleRows);
+}
+
+// 대한민국 공휴일 (고정일 + 해당 연도 설·추석·부처님오신날)
+function getKoreanHolidays(year) {
+  var h = {};
+  var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+  var add = function(m, d, name) { h[year + '-' + pad(m) + '-' + pad(d)] = name; };
+  add(1, 1, '신정');
+  add(3, 1, '삼일절');
+  add(5, 5, '어린이날');
+  add(6, 6, '현충일');
+  add(8, 15, '광복절');
+  add(10, 3, '개천절');
+  add(10, 9, '한글날');
+  add(12, 25, '크리스마스');
+  if (year === 2025) {
+    add(1, 28, '설날'); add(1, 29, '설날'); add(1, 30, '설날');
+    add(5, 25, '부처님오신날');
+    add(10, 5, '추석'); add(10, 6, '추석'); add(10, 7, '추석');
+  } else if (year === 2026) {
+    add(2, 16, '설날'); add(2, 17, '설날'); add(2, 18, '설날');
+    add(5, 24, '부처님오신날');
+    add(9, 24, '추석'); add(9, 25, '추석'); add(9, 26, '추석');
+  } else if (year === 2027) {
+    add(2, 6, '설날'); add(2, 7, '설날'); add(2, 8, '설날');
+    add(5, 13, '부처님오신날');
+    add(9, 15, '추석'); add(9, 16, '추석'); add(9, 17, '추석');
+  } else if (year === 2024) {
+    add(2, 9, '설날'); add(2, 10, '설날'); add(2, 11, '설날');
+    add(5, 15, '부처님오신날');
+    add(9, 16, '추석'); add(9, 17, '추석'); add(9, 18, '추석');
+  }
+  return h;
+}
+
+function formatDateYMD(d) {
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+function parseDateYMD(ymdStr) {
+  if (!ymdStr || typeof ymdStr !== 'string') return null;
+  var parts = ymdStr.trim().split('-');
+  if (parts.length !== 3) return null;
+  var y = parseInt(parts[0], 10);
+  var m = parseInt(parts[1], 10) - 1;
+  var d = parseInt(parts[2], 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+  var dt = new Date(y, m, d, 12, 0, 0);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function getTasksForDay(rows, dayStr, holidays) {
+  var d = parseDateYMD(dayStr);
+  if (d && (d.getDay() === 0 || d.getDay() === 6)) return [];
+  if (holidays && holidays[dayStr]) return [];
+  var list = [];
+  for (var i = 0; i < (rows || []).length; i++) {
+    var r = rows[i];
+    var start = (r.startDate || '').trim();
+    var end = (r.endDate || '').trim();
+    if (!start) continue;
+    var endUse = end || start;
+    if (dayStr >= start && dayStr <= endUse) {
+      list.push({ label: r.category, memo: (r.memo || '').trim() });
+    }
+  }
+  return list;
+}
+
+function renderDayCell(date, tasks, todayStr, otherMonth, holidays) {
+  var dayStr = formatDateYMD(date);
+  var dayNum = date.getDate();
+  var dow = date.getDay();
+  var numClass = 'weekday';
+  if (dow === 0) numClass = 'sunday';
+  else if (dow === 6) numClass = 'saturday';
+  if (otherMonth) numClass += ' other-month';
+  var holidayName = (holidays && holidays[dayStr]) || '';
+  if (holidayName) numClass += ' holiday';
+
+  var cardsHtml = '';
+  for (var t = 0; t < tasks.length; t++) {
+    var label = tasks[t].label || '';
+    if (tasks[t].memo) label += (label ? ', ' : '') + tasks[t].memo;
+    var cardClass = 'schedule-task-card';
+    if (dayStr === todayStr) cardClass += ' today';
+    cardsHtml += '<div class="' + cardClass + '">' + escapeHtml(label) + '</div>';
+  }
+  var holidayHtml = holidayName ? '<span class="schedule-holiday-label">' + escapeHtml(holidayName) + '</span>' : '';
+
+  return '<div class="schedule-day-cell">' +
+    '<span class="schedule-day-num ' + numClass + '">' + dayNum + '</span>' +
+    holidayHtml +
+    cardsHtml +
+    '</div>';
+}
+
+function saveScheduleFromForm() {
+  if (!currentScheduleSiteName) {
+    alert('현장을 선택하고 일정을 불러온 뒤 저장해 주세요.');
+    return;
+  }
+  if (!currentScheduleRows || currentScheduleRows.length === 0) {
+    alert('일정 자동 계산을 먼저 실행해 주세요.');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(msg) {
+      alert(msg);
+    })
+    .withFailureHandler(function(err) {
+      alert('저장 실패: ' + (err && err.message ? err.message : err));
+    })
+    .saveSchedule(currentScheduleSiteName, JSON.stringify(currentScheduleRows));
+}
+
+function schedulePrintPdf() {
+  var calArea = document.getElementById('schedule-calendar-area');
+  if (!calArea || !calArea.innerHTML.trim()) { alert('일정을 불러온 뒤 사용해 주세요.'); return; }
+  var title = (currentScheduleSiteName || '일정') + ' - 일정 캘린더';
+  var calCss = '<style>.schedule-calendar-wrap{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.08);border:1px solid #e0e0e0}.schedule-calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.schedule-calendar-title{font-size:1.15rem;font-weight:bold;color:#212529}.schedule-calendar-header .btn-outline-secondary{color:#495057;border-color:#dee2e6;background:#fff}.schedule-calendar-header .btn-outline-secondary:hover{background:#f8f9fa;border-color:#adb5bd}.schedule-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#dee2e6;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.schedule-day-cell{min-height:72px;background:#fff;padding:6px;display:flex;flex-direction:column;align-items:flex-end;border:1px solid #f1f3f5}.schedule-day-num{font-size:0.85rem;font-weight:600;margin-bottom:4px}.schedule-day-num.sunday{color:#dc3545}.schedule-day-num.saturday{color:#0d6efd}.schedule-day-num.weekday{color:#212529}.schedule-day-num.other-month{color:#adb5bd}.schedule-day-num.holiday{color:#fd7e14}.schedule-holiday-label{display:block;font-size:0.65rem;color:#fd7e14;margin-bottom:2px;font-weight:600}.schedule-task-card{font-size:0.7rem;padding:4px 8px;margin-top:3px;border-radius:6px;border:1px solid #e9ecef;background:#f8f9fa;color:#212529;text-align:left}.schedule-task-card::before{background:#6c757d}.schedule-task-card.today{background:#e7f1ff;border-color:#0d6efd}.schedule-weekday-header{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e9ecef;padding:8px 6px;text-align:center;font-size:0.75rem;font-weight:bold;color:#495057}</style>';
+  var win = window.open('', '_blank');
+  var header = '<div class="d-flex justify-content-between align-items-center mb-3"><h5 class="text-dark mb-0">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5><button type="button" onclick="window.print()" class="btn btn-primary btn-sm">인쇄 / PDF 저장</button></div>';
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escapeHtml(title) + '</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">' + calCss + '</head><body class="p-3 bg-white">' + header + calArea.innerHTML + '</body></html>');
+  win.document.close();
+  win.focus();
+}
+
+function scheduleEstimatePdf() {
+  var calArea = document.getElementById('schedule-calendar-area');
+  if (!calArea || !calArea.innerHTML.trim()) { alert('일정을 불러온 뒤 사용해 주세요.'); return; }
+  google.script.run
+    .withSuccessHandler(function(estimateHtml) {
+      if (!estimateHtml || !estimateHtml.trim()) {
+        alert('해당 현장 견적서가 없습니다. 견적내기에서 먼저 견적을 저장해 주세요.');
+        return;
+      }
+      var calCss = '<style>.schedule-calendar-wrap{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.08);border:1px solid #e0e0e0}.schedule-calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.schedule-calendar-title{font-size:1.15rem;font-weight:bold;color:#212529}.schedule-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#dee2e6;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.schedule-day-cell{min-height:72px;background:#fff;padding:6px;display:flex;flex-direction:column;align-items:flex-end;border:1px solid #f1f3f5}.schedule-day-num{font-size:0.85rem;font-weight:600;margin-bottom:4px}.schedule-day-num.sunday{color:#dc3545}.schedule-day-num.saturday{color:#0d6efd}.schedule-day-num.weekday{color:#212529}.schedule-day-num.other-month{color:#adb5bd}.schedule-day-num.holiday{color:#fd7e14}.schedule-holiday-label{display:block;font-size:0.65rem;color:#fd7e14;margin-bottom:2px;font-weight:600}.schedule-task-card{font-size:0.7rem;padding:4px 8px;margin-top:3px;border-radius:6px;border:1px solid #e9ecef;background:#f8f9fa;color:#212529;text-align:left}.schedule-task-card.today{background:#e7f1ff;border-color:#0d6efd}.schedule-weekday-header{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e9ecef;padding:8px 6px;text-align:center;font-size:0.75rem;font-weight:bold;color:#495057}</style>';
+      var calHeader = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h5 style="margin:0;font-size:1.1rem">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5><button type="button" onclick="window.print()" style="padding:6px 12px;background:#0d6efd;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px">인쇄 / PDF 저장</button></div>';
+      var calendarSection = '<div class="sheet" style="page-break-before:always;padding:16px"><h2 style="font-size:1.3em;margin-bottom:12px">일정 캘린더</h2>' + calCss + calHeader + calArea.innerHTML + '</div></body></html>';
+      var fullHtml = estimateHtml.trim() + calendarSection;
+      var win = window.open('', '_blank');
+      win.document.write(fullHtml);
+      win.document.close();
+      win.focus();
+    })
+    .withFailureHandler(function(err) {
+      alert('견적서를 불러오는 중 오류가 났습니다. ' + (err && err.message ? err.message : ''));
+    })
+    .getEstimatePdfHtml(currentScheduleSiteName);
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  var s = String(str);
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// 전역 노출
+window.loadScheduleScreen = loadScheduleScreen;
+window.loadScheduleForSelectedSite = loadScheduleForSelectedSite;
+window.saveScheduleFromForm = saveScheduleFromForm;
+window.scheduleCalendarPrevMonth = scheduleCalendarPrevMonth;
+window.scheduleCalendarNextMonth = scheduleCalendarNextMonth;
+window.runScheduleAutoCalc = runScheduleAutoCalc;
+window.schedulePrintPdf = schedulePrintPdf;
+window.scheduleEstimatePdf = scheduleEstimatePdf;
+</script>

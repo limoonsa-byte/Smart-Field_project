@@ -11,6 +11,26 @@ function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
+/** ✅ 웹앱에서 사용할 스프레드시트 ID (현장관리 시스템ver.8) - Script Properties에 SPREADSHEET_ID가 있으면 그걸 우선 사용 */
+var DEFAULT_SPREADSHEET_ID = '13EkY138W9VautJxNjD2YyBkJMyMui2AztkIjhxeRMDaUPjfL-K7psUP9';
+
+/**
+ * ✅ 웹앱에서 사용할 스프레드시트 가져오기
+ * - Script Properties의 SPREADSHEET_ID 또는 DEFAULT_SPREADSHEET_ID 사용 → 도면보관함과 구글시트 일치
+ */
+function getSpreadsheet_() {
+  try {
+    var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || (typeof DEFAULT_SPREADSHEET_ID !== 'undefined' ? DEFAULT_SPREADSHEET_ID : '');
+    if (id && String(id).trim()) {
+      return SpreadsheetApp.openById(String(id).trim());
+    }
+  } catch (e) {}
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet();
+  } catch (e2) {}
+  return null;
+}
+
 /** 시트명 안전 처리 */
 function sanitizeSheetName_(name) {
   name = String(name || '').trim();
@@ -51,6 +71,18 @@ function formatNowKST_() {
 /** 도면 보관함 시트 이름 (한 시트에서 모두 관리) */
 const DRAWING_SHEET_NAME = '도면보관함';
 
+/** ✅ '도면보관함' 또는 '도면 보관함' 시트 찾기 (띄어쓰기 유무 + 유사 이름 지원) */
+function getDrawingSheet_(ss) {
+  var s = ss.getSheetByName('도면보관함') || ss.getSheetByName('도면 보관함');
+  if (s) return s;
+  var all = ss.getSheets();
+  for (var i = 0; i < all.length; i++) {
+    var name = all[i].getName();
+    if (name.indexOf('도면') !== -1 && name.indexOf('보관') !== -1) return all[i];
+  }
+  return null;
+}
+
 /**
  * ✅ 저장: "도면보관함" 시트 하나에 행으로 추가 (한 시트에서 모두 관리)
  * - data는 문자열(JSON)로 들어옴
@@ -60,11 +92,11 @@ function saveToSheet(data) {
   lock.waitLock(10000);
 
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet_();
     const jsonData = JSON.parse(data);
 
     const rawSiteName = String(jsonData.siteName || '').trim();
-    let sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    let sheet = getDrawingSheet_(ss);
 
     if (!sheet) {
       sheet = ss.insertSheet(DRAWING_SHEET_NAME, ss.getNumSheets());
@@ -108,8 +140,8 @@ function saveToSheet(data) {
  */
 function getDataList() {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    const ss = getSpreadsheet_();
+    const sheet = getDrawingSheet_(ss);
     if (!sheet || sheet.getLastRow() < 2) return '[]';
 
     const lastRow = sheet.getLastRow();
@@ -143,8 +175,8 @@ function getDataList() {
  */
 function getDrawingBySiteName(siteName) {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    const ss = getSpreadsheet_();
+    const sheet = getDrawingSheet_(ss);
     if (!sheet || sheet.getLastRow() < 2) return null;
 
     const rawName = String(siteName || '').trim();
@@ -184,9 +216,9 @@ function getDrawingBySiteName(siteName) {
  */
 function getData() {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet_();
     const bySite = {};
-    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    const sheet = getDrawingSheet_(ss);
 
     if (sheet && sheet.getLastRow() >= 2) {
       const lastRow = sheet.getLastRow();
@@ -243,52 +275,163 @@ function getData() {
   }
 }
 
+/** 현장명 비교용 정규화 (공백·타입 통일) */
+function normalizeSiteName_(val) {
+  if (val == null) return '';
+  var s = String(val).trim();
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
 /**
- * ✅ 삭제: "도면보관함" 시트에서 해당 현장의 최신 저장 행 1개 삭제
+ * ✅ 도면보관함 연결 상태 진단 (스크립트 에디터에서 실행하거나 웹앱에서 호출)
+ * - 사용 중인 스프레드시트 이름/ID, 시트 이름, B열(현장명) 샘플 반환
+ */
+function getDrawingStorageDiagnostics() {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return "❌ 스프레드시트를 열 수 없습니다. Script Properties에 SPREADSHEET_ID를 넣거나, 스크립트를 시트에 연결하세요.";
+    var sheet = getDrawingSheet_(ss);
+    if (!sheet) {
+      var names = ss.getSheets().map(function(s) { return s.getName(); });
+      return "스프레드시트: " + ss.getName() + " (ID: " + ss.getId() + ")\n\n'도면보관함' 시트 없음. 현재 시트 목록: " + names.join(', ');
+    }
+    var lastRow = sheet.getLastRow();
+    var out = "스프레드시트: " + ss.getName() + " (ID: " + ss.getId() + ")\n시트: " + sheet.getName() + "\n데이터 행 수: " + (lastRow >= 2 ? lastRow - 1 : 0);
+    if (lastRow >= 2) {
+      var data = sheet.getRange(2, 1, Math.min(lastRow, 6), 2).getValues();
+      out += "\n\nB열(현장명) 샘플:\n";
+      for (var i = 0; i < data.length; i++) {
+        out += "  " + (i + 2) + "행: \"" + String(data[i][1] || '').trim() + "\"\n";
+      }
+    }
+    return out;
+  } catch (e) {
+    return "진단 오류: " + (e.toString ? e.toString() : String(e));
+  }
+}
+
+/**
+ * ✅ 연결 안된 항목 정리: 도면보관함에서 현장별 "최신 1행"만 남기고, 같은 현장의 나머지(중복·오래된) 행 삭제
+ * - 목록에 보이는 항목 = 현장당 최신 1건이므로, 그에 맞춰 시트를 정리
+ */
+function deleteUnconnectedDrawingRows() {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (lockErr) {
+    return "❌ 정리 대기 중 오류: " + (lockErr.message || lockErr);
+  }
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return "❌ 스프레드시트를 열 수 없습니다.";
+    var sheet = getDrawingSheet_(ss);
+    if (!sheet) return "❌ '도면보관함' 시트를 찾을 수 없습니다.";
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return "✅ 정리할 데이터가 없습니다.";
+    var data = sheet.getRange(2, 1, lastRow, 2).getValues();
+    // 현장명별로 "최신 날짜"인 행 번호만 남길 것 (그 행은 유지)
+    var keepRowBySite = {};
+    for (var r = 0; r < data.length; r++) {
+      var siteName = normalizeSiteName_(data[r][1]);
+      if (!siteName) continue;
+      var rowNum = r + 2;
+      var dVal = data[r][0];
+      var dateStr = (dVal instanceof Date)
+        ? Utilities.formatDate(dVal, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss')
+        : String(dVal || '');
+      if (!keepRowBySite[siteName] || dateStr > keepRowBySite[siteName].date) {
+        keepRowBySite[siteName] = { row: rowNum, date: dateStr };
+      }
+    }
+    var toDelete = [];
+    for (var r = 0; r < data.length; r++) {
+      var siteName = normalizeSiteName_(data[r][1]);
+      if (!siteName) continue;
+      var rowNum = r + 2;
+      var keep = keepRowBySite[siteName];
+      if (keep && keep.row === rowNum) continue;
+      toDelete.push(rowNum);
+    }
+    if (toDelete.length === 0) {
+      return "✅ 현장별로 이미 1건씩만 있어서 정리할 행이 없습니다.";
+    }
+    toDelete.sort(function(a, b) { return b - a; });
+    for (var i = 0; i < toDelete.length; i++) {
+      sheet.deleteRow(toDelete[i]);
+    }
+    SpreadsheetApp.flush();
+    return "✅ 연결 안 된(중복·오래된) 항목 " + toDelete.length + "건을 삭제했습니다. 목록을 새로고침해 주세요.";
+  } catch (e) {
+    return "❌ 정리 오류: " + (e.toString ? e.toString() : String(e));
+  } finally {
+    try { lock.releaseLock(); } catch (e2) {}
+  }
+}
+
+/**
+ * ✅ 삭제: "도면보관함" 시트에서 해당 현장명과 일치하는 행을 모두 삭제
+ * - B열(현장명)을 정규화해서 비교하여 일치하는 행만 아래쪽부터 deleteRow
  * - "도면보관함" 없으면 예전 방식(현장별 시트 마지막 행 삭제)으로 처리
  */
 function deleteFromSheet(siteName) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (lockErr) {
+    return "❌ 삭제 대기 중 오류: " + (lockErr.message || lockErr);
+  }
 
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rawName = String(siteName || '').trim();
-    const sheet = ss.getSheetByName(DRAWING_SHEET_NAME);
+    var ss = getSpreadsheet_();
+    if (!ss) return "❌ 스프레드시트를 열 수 없습니다. Apps Script 프로젝트 설정 → 스크립트 속성에 SPREADSHEET_ID(구글 시트 URL의 /d/ 와 /edit 사이 값)를 넣어 주세요.";
+    var rawName = normalizeSiteName_(siteName);
+    if (!rawName) return "❌ 현장명이 비어 있습니다.";
 
-    if (sheet && sheet.getLastRow() >= 2) {
-      const lastRow = sheet.getLastRow();
-      const rows = sheet.getRange(2, 1, lastRow, 2).getValues();
-      let deleteRowIndex = -1;
-      let latestDate = '';
-      for (let r = 0; r < rows.length; r++) {
-        if (String(rows[r][1] || '').trim() !== rawName) continue;
-        const d = rows[r][0];
-        const dateStr = d instanceof Date ? Utilities.formatDate(d, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss') : String(d || '');
-        if (dateStr > latestDate) {
-          latestDate = dateStr;
-          deleteRowIndex = r + 2;
+    var sheet = getDrawingSheet_(ss);
+    if (!sheet) return "❌ '도면보관함' 또는 '도면 보관함' 시트를 찾을 수 없습니다. 시트 탭 이름을 확인해 주세요.";
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      // A열(저장시각), B열(현장명)만 읽기. 행 인덱스 1-based
+      var data = sheet.getRange(2, 1, lastRow, 2).getValues();
+      var toDelete = [];
+      for (var r = 0; r < data.length; r++) {
+        var cellB = data[r][1];
+        var rowName = normalizeSiteName_(cellB);
+        if (rowName !== rawName) continue;
+        toDelete.push(r + 2);
+      }
+      if (toDelete.length > 0) {
+        toDelete.sort(function(a, b) { return b - a; });
+        for (var i = 0; i < toDelete.length; i++) {
+          sheet.deleteRow(toDelete[i]);
         }
+        SpreadsheetApp.flush();
+        return "✅ '" + rawName + "' 도면 " + toDelete.length + "건이 삭제되었습니다.";
       }
-      if (deleteRowIndex >= 0) {
-        sheet.deleteRow(deleteRowIndex);
-        return "✅ '" + rawName + "' 도면이 삭제되었습니다.";
+      // 일치하는 행 없음 → 원인 파악용 메시지
+      var sampleB = [];
+      for (var s = 0; s < Math.min(5, data.length); s++) {
+        sampleB.push('"' + String(data[s][1] || '').trim() + '"');
       }
+      return "❌ '" + rawName + "'와(과) 일치하는 행이 없습니다.\n\n[서버 확인]\n스프레드시트: " + ss.getName() + "\n시트: " + sheet.getName() + "\n데이터 행 수: " + (lastRow - 1) + "\nB열 샘플(처음 5개): " + sampleB.join(', ') + "\n\n→ 스프레드시트/시트가 맞는지, B열이 현장명인지 확인하세요.";
     }
 
     // 예전 방식: 현장명으로 된 시트에서 마지막 행 삭제
-    const baseName = sanitizeSheetName_(rawName);
-    const oldSheet = ss.getSheetByName(baseName);
+    var baseName = sanitizeSheetName_(rawName);
+    var oldSheet = ss.getSheetByName(baseName);
     if (!oldSheet) return "❌ '" + rawName + "' 데이터를 찾을 수 없습니다.";
-    const lastRow = oldSheet.getLastRow();
-    if (lastRow < 2) return "❌ 삭제할 데이터가 없습니다.";
-    oldSheet.deleteRow(lastRow);
+    var oldLastRow = oldSheet.getLastRow();
+    if (oldLastRow < 2) return "❌ 삭제할 데이터가 없습니다.";
+    oldSheet.deleteRow(oldLastRow);
     if (oldSheet.getLastRow() < 2) ss.deleteSheet(oldSheet);
+    SpreadsheetApp.flush();
     return "✅ '" + rawName + "' 도면이 삭제되었습니다.";
   } catch (e) {
-    return "❌ 삭제 오류: " + e.toString();
+    return "❌ 삭제 오류: " + (e.toString ? e.toString() : String(e));
   } finally {
-    lock.releaseLock();
+    try { lock.releaseLock(); } catch (e2) {}
   }
 }
 
@@ -310,7 +453,7 @@ function getAllPriceTables() {
     const cached = cache.get(PRICE_TABLES_CACHE_KEY);
     if (cached != null) return cached;
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet_();
     const sheets = ss.getSheets();
     const result = {};
 
@@ -351,7 +494,16 @@ function getAllPriceTables() {
           });
         }
 
-        if (items.length > 0) result[category] = items;
+        // 구 도배필름공사(품목) 시트: 항목을 도배공사/필름공사로 나누어 채움
+        if (category === '도배필름공사' && items.length > 0) {
+          const 도배품목 = ['도배', '실크', '친환경도배', '도배 자재비 - 합지', '도배 자재비 - 실크', '도배 자재비 - 디아망', '도배 부자재', '도배 인건비'];
+          const 도배Items = items.filter(it => 도배품목.indexOf(it.item) !== -1);
+          const 필름Items = items.filter(it => 도배품목.indexOf(it.item) === -1);
+          if (도배Items.length > 0) result['도배공사'] = 도배Items;
+          if (필름Items.length > 0) result['필름공사'] = 필름Items;
+        } else if (items.length > 0) {
+          result[category] = items;
+        }
       }
     });
 
@@ -373,7 +525,7 @@ function saveEstimate(estimateData) {
   lock.waitLock(10000);
 
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet_();
     const data = JSON.parse(estimateData);
     
     const sheetName = '견적_' + sanitizeSheetName_(data.siteName);
@@ -402,7 +554,7 @@ function saveEstimate(estimateData) {
     const headerRow = sheet.getLastRow();
     
     // 공정 순서 (대제목 + 하위 품목)
-    const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+    const categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
     const byCategory = {};
     data.items.forEach(function(item) {
       if (!byCategory[item.category]) byCategory[item.category] = [];
@@ -466,6 +618,373 @@ function saveEstimate(estimateData) {
   }
 }
 
+// ========================================
+// 일정 관련 함수
+// ========================================
+
+const SCHEDULE_SHEET_NAME = '일정';
+
+/** 일정 시트 가져오기. 없으면 헤더와 함께 생성 */
+function getOrCreateScheduleSheet_(ss) {
+  var sheet = ss.getSheetByName(SCHEDULE_SHEET_NAME);
+  if (sheet) return sheet;
+  sheet = ss.insertSheet(SCHEDULE_SHEET_NAME, ss.getNumSheets());
+  sheet.appendRow(['현장명', '공정', '시작일', '종료일', '비고']);
+  sheet.getRange(1, 1, 1, 5).setFontWeight('bold');
+  return sheet;
+}
+
+/**
+ * 일정을 만들 수 있는 현장 목록 (견적_ 시트가 있는 현장명)
+ * - 반환: JSON 문자열 배열 ["현장A", "현장B", ...]
+ */
+function getScheduleList() {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return JSON.stringify([]);
+    var names = ss.getSheets().map(function(s) { return s.getName(); });
+    var list = [];
+    var prefix = '견적_';
+    for (var i = 0; i < names.length; i++) {
+      if (names[i].indexOf(prefix) === 0) {
+        var siteName = names[i].slice(prefix.length).trim();
+        if (siteName && list.indexOf(siteName) === -1) list.push(siteName);
+      }
+    }
+    list.sort();
+    return JSON.stringify(list);
+  } catch (e) {
+    return JSON.stringify([]);
+  }
+}
+
+/**
+ * 해당 현장의 일정 조회
+ * - 반환: JSON 문자열 [{ category, startDate, endDate, memo }, ...]
+ */
+function getSchedule(siteName) {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return JSON.stringify([]);
+    var sheet = getOrCreateScheduleSheet_(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return JSON.stringify([]);
+    var data = sheet.getRange(2, 1, lastRow, 5).getValues();
+    var rawName = String(siteName || '').trim();
+    var result = [];
+    for (var r = 0; r < data.length; r++) {
+      var row = data[r];
+      if (String(row[0] || '').trim() !== rawName) continue;
+      result.push({
+        category: String(row[1] || ''),
+        startDate: String(row[2] || '').trim(),
+        endDate: String(row[3] || '').trim(),
+        memo: String(row[4] || '').trim()
+      });
+    }
+    return JSON.stringify(result);
+  } catch (e) {
+    return JSON.stringify([]);
+  }
+}
+
+/**
+ * 일정 + 공정별 노무비·재료비 한 번에 조회 (일정 화면 불러오기 1회 호출용)
+ * - 반환: JSON 문자열 { schedule: [...], labor: {...}, material: {...} }
+ */
+function getScheduleWithLaborAndMaterial(siteName) {
+  var scheduleJson = getSchedule(siteName);
+  var combinedJson = getEstimateLaborAndMaterialByCategory(siteName);
+  try {
+    var schedule = JSON.parse(scheduleJson || '[]');
+    var combined = JSON.parse(combinedJson || '{}');
+    return JSON.stringify({
+      schedule: schedule,
+      labor: combined.labor || {},
+      material: combined.material || {}
+    });
+  } catch (e) {
+    return JSON.stringify({ schedule: [], labor: {}, material: {} });
+  }
+}
+
+/**
+ * 해당 현장의 일정 저장 (기존 행 삭제 후 추가)
+ * - scheduleData: JSON 문자열. 배열 [{ category, startDate, endDate, memo }, ...]
+ */
+function saveSchedule(siteName, scheduleData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (lockErr) {
+    return "❌ 일정 저장 대기 중 오류: " + (lockErr.message || lockErr);
+  }
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return "❌ 스프레드시트를 열 수 없습니다.";
+    var sheet = getOrCreateScheduleSheet_(ss);
+    var rawName = String(siteName || '').trim();
+    if (!rawName) return "❌ 현장명이 비어 있습니다.";
+
+    var data = JSON.parse(scheduleData || '[]');
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var allData = sheet.getRange(2, 1, lastRow, 1).getValues();
+      var toDelete = [];
+      for (var r = 0; r < allData.length; r++) {
+        if (String(allData[r][0] || '').trim() === rawName) toDelete.push(r + 2);
+      }
+      toDelete.sort(function(a, b) { return b - a; });
+      for (var i = 0; i < toDelete.length; i++) {
+        sheet.deleteRow(toDelete[i]);
+      }
+    }
+
+    for (var j = 0; j < data.length; j++) {
+      var row = data[j];
+      sheet.appendRow([
+        rawName,
+        String(row.category || ''),
+        String(row.startDate || '').trim(),
+        String(row.endDate || '').trim(),
+        String(row.memo || '').trim()
+      ]);
+    }
+    SpreadsheetApp.flush();
+    return "✅ 일정이 저장되었습니다.";
+  } catch (e) {
+    return "❌ 일정 저장 오류: " + (e.toString ? e.toString() : String(e));
+  } finally {
+    try { lock.releaseLock(); } catch (e2) {}
+  }
+}
+
+/**
+ * 견적서 시트에서 공정별 노무비(인건비) 합계 조회
+ * - siteName에 해당하는 견적_현장명 시트를 읽어, ■ 공정명 섹션별로 노무비금액 합계 반환
+ * - 노무비금액 열: 헤더 행에서 "노무비금액" 또는 "노무비" 포함 열을 찾고, 없으면 9열(I열) 사용
+ * - 반환: JSON 문자열 { "가설철거": 80000, "목공사": 250000, ... }
+ */
+function getEstimateLaborByCategory(siteName) {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return JSON.stringify({});
+    var sheetName = '견적_' + sanitizeSheetName_(String(siteName || '').trim());
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return JSON.stringify({});
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 5) return JSON.stringify({});
+    var data = sheet.getRange(1, 1, lastRow, 10).getValues();
+    var laborColIndex = 8;
+    for (var h = 0; h < Math.min(6, data.length); h++) {
+      var headerRow = data[h];
+      for (var col = 0; col < headerRow.length; col++) {
+        var cell = String(headerRow[col] || '').trim();
+        if (cell.indexOf('노무비금액') !== -1 || (cell.indexOf('노무비') !== -1 && cell.indexOf('단가') === -1)) {
+          laborColIndex = col;
+          break;
+        }
+      }
+    }
+    var result = {};
+    var currentCat = null;
+    for (var r = 0; r < data.length; r++) {
+      var row = data[r];
+      var a = row[0];
+      var b = String(row[1] || '').trim();
+      if (b.indexOf('■') === 0) {
+        currentCat = b.replace(/^■\s*/, '').trim();
+        if (currentCat) result[currentCat] = 0;
+        continue;
+      }
+      if (currentCat && a !== '' && a !== null && !isNaN(Number(a))) {
+        var labor = Number(row[laborColIndex]) || 0;
+        result[currentCat] = (result[currentCat] || 0) + labor;
+      }
+      if (b.indexOf(' 소계') !== -1) currentCat = null;
+    }
+    // 구 견적: 도배필름공사 한 섹션 → 도배공사/필름공사로 나누어 일정에 노무비 표시
+    if (result['도배필름공사'] != null) {
+      var v = result['도배필름공사'];
+      result['도배공사'] = (result['도배공사'] || 0) + Math.floor(v / 2);
+      result['필름공사'] = (result['필름공사'] || 0) + (v - Math.floor(v / 2));
+      delete result['도배필름공사'];
+    }
+    return JSON.stringify(result);
+  } catch (e) {
+    return JSON.stringify({});
+  }
+}
+
+/**
+ * 견적서 시트에서 공정별 노무비 + 재료비 합계 조회 (일정 화면용)
+ * - 반환: JSON 문자열 { "labor": { "가설철거": 80000, ... }, "material": { "가설철거": 120000, ... } }
+ */
+function getEstimateLaborAndMaterialByCategory(siteName) {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return JSON.stringify({ labor: {}, material: {} });
+    var sheetName = '견적_' + sanitizeSheetName_(String(siteName || '').trim());
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return JSON.stringify({ labor: {}, material: {} });
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 5) return JSON.stringify({ labor: {}, material: {} });
+    var data = sheet.getRange(1, 1, lastRow, 10).getValues();
+    var laborColIndex = 8;
+    var materialColIndex = 6;
+    for (var h = 0; h < Math.min(6, data.length); h++) {
+      var headerRow = data[h];
+      for (var col = 0; col < headerRow.length; col++) {
+        var cell = String(headerRow[col] || '').trim();
+        if (cell.indexOf('노무비금액') !== -1 || (cell.indexOf('노무비') !== -1 && cell.indexOf('단가') === -1)) laborColIndex = col;
+        if (cell.indexOf('재료비금액') !== -1 || (cell.indexOf('재료비') !== -1 && cell.indexOf('단가') === -1)) materialColIndex = col;
+      }
+    }
+    var laborResult = {};
+    var materialResult = {};
+    var currentCat = null;
+    for (var r = 0; r < data.length; r++) {
+      var row = data[r];
+      var a = row[0];
+      var b = String(row[1] || '').trim();
+      if (b.indexOf('■') === 0) {
+        currentCat = b.replace(/^■\s*/, '').trim();
+        if (currentCat) { laborResult[currentCat] = 0; materialResult[currentCat] = 0; }
+        continue;
+      }
+      if (currentCat && a !== '' && a !== null && !isNaN(Number(a))) {
+        laborResult[currentCat] = (laborResult[currentCat] || 0) + (Number(row[laborColIndex]) || 0);
+        materialResult[currentCat] = (materialResult[currentCat] || 0) + (Number(row[materialColIndex]) || 0);
+      }
+      if (b.indexOf(' 소계') !== -1) currentCat = null;
+    }
+    if (laborResult['도배필름공사'] != null) {
+      var lv = laborResult['도배필름공사'];
+      var mv = materialResult['도배필름공사'];
+      laborResult['도배공사'] = (laborResult['도배공사'] || 0) + Math.floor(lv / 2);
+      laborResult['필름공사'] = (laborResult['필름공사'] || 0) + (lv - Math.floor(lv / 2));
+      materialResult['도배공사'] = (materialResult['도배공사'] || 0) + Math.floor(mv / 2);
+      materialResult['필름공사'] = (materialResult['필름공사'] || 0) + (mv - Math.floor(mv / 2));
+      delete laborResult['도배필름공사'];
+      delete materialResult['도배필름공사'];
+    }
+    return JSON.stringify({ labor: laborResult, material: materialResult });
+  } catch (e) {
+    return JSON.stringify({ labor: {}, material: {} });
+  }
+}
+
+/** HTML 이스케이프 (서버용) */
+function escapeHtml_(s) {
+  if (s == null || s === '') return '';
+  var str = String(s);
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
+ * 견적 시트를 읽어 견적 PDF용 HTML 문자열 반환 (견적내기 PDF 내보내기와 동일 형식)
+ */
+function getEstimatePdfHtml(siteName) {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return '';
+    var sheetName = '견적_' + sanitizeSheetName_(String(siteName || '').trim());
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return '';
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 8) return '';
+    var data = sheet.getRange(1, 1, lastRow, 10).getValues();
+    var siteNameVal = siteName || '';
+    var areaVal = '';
+    if (data.length > 1) {
+      var r1 = data[1];
+      if (r1 && r1[1]) siteNameVal = String(r1[1]).trim();
+      if (r1 && r1[3]) areaVal = String(r1[3]).replace(/평/g, '').trim();
+    }
+    var headerRowIndex = -1;
+    for (var h = 0; h < Math.min(10, data.length); h++) {
+      if (String(data[h][0] || '').trim() === 'No') { headerRowIndex = h; break; }
+    }
+    if (headerRowIndex < 0) return '';
+    var categories = [];
+    var byCategory = {};
+    var currentCat = null;
+    var subtotal = 0, overhead = 0, profit = 0, adjusted = 0, total = 0;
+    for (var r = headerRowIndex + 1; r < data.length; r++) {
+      var row = data[r];
+      var b1 = String(row[1] || '').trim();
+      var b9 = String(row[8] || '').trim(); // 소계/공과잡비/이윤/조정액/총액은 9번째 열에 저장됨
+      if (b1.indexOf('■') === 0) {
+        currentCat = b1.replace(/^■\s*/, '').trim();
+        if (currentCat && byCategory[currentCat] === undefined) { categories.push(currentCat); byCategory[currentCat] = []; }
+        continue;
+      }
+      if (b1.indexOf(' 소계') !== -1) { currentCat = null; continue; }
+      if (currentCat && row[0] !== '' && row[0] != null && !isNaN(Number(row[0]))) byCategory[currentCat].push(row);
+      if (b9 === '소계') subtotal = Number(row[9]) || 0;
+      if (b9.indexOf('공과잡비') !== -1) overhead = Number(row[9]) || 0;
+      if (b9.indexOf('이윤') !== -1) profit = Number(row[9]) || 0;
+      if (b9.indexOf('조정액') !== -1) adjusted = Number(row[9]) || 0;
+      if (b9.indexOf('총액') !== -1) total = Number(row[9]) || 0;
+    }
+    var materialTotal = 0, laborTotal = 0;
+    var coverRows = '';
+    var coverRowNo = 0;
+    for (var c = 0; c < categories.length; c++) {
+      var cat = categories[c];
+      var items = byCategory[cat] || [];
+      if (items.length === 0) continue;
+      var catMat = 0, catLabor = 0, catSum = 0;
+      for (var i = 0; i < items.length; i++) {
+        catMat += Number(items[i][6]) || 0;
+        catLabor += Number(items[i][8]) || 0;
+        catSum += Number(items[i][9]) || 0;
+      }
+      materialTotal += catMat;
+      laborTotal += catLabor;
+      coverRowNo++;
+      coverRows += '<tr><td class="text-center">' + coverRowNo + '</td><td>' + escapeHtml_(cat) + '</td><td class="text-center">식</td><td class="text-end">1</td><td class="text-end">' + Math.round(catMat).toLocaleString() + '</td><td class="text-end">' + Math.round(catLabor).toLocaleString() + '</td><td class="text-end">' + Math.round(catSum).toLocaleString() + '</td><td></td></tr>';
+    }
+    if (!coverRows) coverRows = '<tr><td class="text-center">1</td><td>-</td><td class="text-center">식</td><td class="text-end">1</td><td class="text-end">0</td><td class="text-end">0</td><td class="text-end">0</td><td></td></tr>';
+    var rows = '';
+    var no = 0;
+    for (var c = 0; c < categories.length; c++) {
+      var cat = categories[c];
+      var items = byCategory[cat] || [];
+      if (items.length === 0) continue;
+      rows += '<tr class="section-header"><td colspan="10"><strong>■ ' + escapeHtml_(cat) + '</strong></td></tr>';
+      for (var i = 0; i < items.length; i++) {
+        no++;
+        var it = items[i];
+        var qtyD = (it[4] != null && it[4] !== '') ? it[4] : '';
+        if (typeof qtyD === 'number' && String(it[1] || '').indexOf('단채움') !== -1) qtyD = Number(qtyD).toFixed(1);
+        rows += '<tr><td>' + no + '</td><td>' + escapeHtml_(it[1]) + '</td><td>' + escapeHtml_(it[2]) + '</td><td>' + escapeHtml_(it[3]) + '</td><td class="text-end">' + qtyD + '</td><td class="text-end">' + Number(it[5]).toLocaleString() + '</td><td class="text-end">' + Number(it[6]).toLocaleString() + '</td><td class="text-end">' + Number(it[7]).toLocaleString() + '</td><td class="text-end">' + Number(it[8]).toLocaleString() + '</td><td class="text-end">' + Number(it[9]).toLocaleString() + '</td></tr>';
+      }
+      var catSum = 0;
+      for (var i = 0; i < items.length; i++) catSum += Number(items[i][9]) || 0;
+      rows += '<tr class="category-subtotal"><td colspan="9" class="text-end"><strong>' + escapeHtml_(cat) + ' 소계</strong></td><td class="text-end"><strong>' + Math.round(catSum).toLocaleString() + '원</strong></td></tr>';
+    }
+    var now = new Date();
+    var writeDate = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    var css = 'body{font-family:Malgun Gothic,sans-serif;margin:0;padding:0;box-sizing:border-box}.sheet{width:273mm;min-height:186mm;padding:12mm;margin:0 auto;box-sizing:border-box}.cover-title{font-size:2em;font-weight:bold;text-align:center;margin:20px 0 25px 0}.cover-project-name{font-size:1.1em;margin-bottom:15px}.cover-table{width:100%;border-collapse:collapse;margin:15px 0;font-size:10pt}.cover-table th,.cover-table td{border:1px solid #333;padding:6px 8px;text-align:center}.cover-table th{background:#eee;font-weight:bold}.cover-total-row{background:#e6f3ff;font-weight:bold;font-size:1.05em}h1{font-size:1.4em;margin:0 0 6px 0}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:10pt}th,td{border:1px solid #333;padding:4px 6px}.text-end{text-align:right}tr.section-header td{background:#e0e0e0;font-weight:bold}tr.category-subtotal td{background:#f5f5f5;font-weight:bold}@media print{.sheet{page-break-after:always}.cover-page{page-break-after:always}}';
+    var totalVal = total > 0 ? total : (subtotal + overhead + profit + adjusted);
+    var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>견적서 - ' + escapeHtml_(siteNameVal) + '</title><style>' + css + '</style></head><body>' +
+      '<div class="sheet cover-page"><div class="cover-title">견 적 서</div><div class="cover-project-name"><span class="cover-project-label">공사 명 :</span> ' + escapeHtml_(siteNameVal) + ' &nbsp; <strong>견적일시:</strong> ' + writeDate + '</div>' +
+      '<table class="cover-table"><thead><tr><th style="width:6%">순번</th><th style="width:24%">품목</th><th style="width:6%">단위</th><th style="width:6%">수량</th><th style="width:18%">재료비</th><th style="width:18%">노무비</th><th style="width:16%">금액</th><th style="width:6%">비고</th></tr></thead><tbody>' +
+      coverRows +
+      '<tr><td colspan="4" class="text-end" style="padding-right:10px">소계</td><td class="text-end">' + Math.round(materialTotal).toLocaleString() + '</td><td class="text-end">' + Math.round(laborTotal).toLocaleString() + '</td><td class="text-end">' + Math.round(subtotal).toLocaleString() + '</td><td></td></tr>' +
+      '<tr><td colspan="4" class="text-end" style="padding-right:10px">공과잡비(5%)</td><td></td><td></td><td class="text-end">' + Math.round(overhead).toLocaleString() + '</td><td></td></tr>' +
+      '<tr><td colspan="4" class="text-end" style="padding-right:10px">이윤(10%)</td><td></td><td></td><td class="text-end">' + Math.round(profit).toLocaleString() + '</td><td></td></tr>' +
+      '<tr><td colspan="4" class="text-end" style="padding-right:10px">조정액</td><td></td><td></td><td class="text-end">' + Math.round(adjusted).toLocaleString() + '</td><td></td></tr>' +
+      '<tr class="cover-total-row"><td colspan="4" class="text-end" style="padding-right:10px"><strong>총액 (VAT 별도)</strong></td><td></td><td></td><td class="text-end"><strong>' + Math.round(totalVal).toLocaleString() + '원</strong></td><td></td></tr></tbody></table></div>' +
+      '<div class="sheet"><h1>견적서 상세 내역</h1><div class="info"><strong>현장명:</strong> ' + escapeHtml_(siteNameVal) + ' &nbsp;|&nbsp; <strong>평수:</strong> ' + escapeHtml_(areaVal) + '평</div>' +
+      '<table><thead><tr><th>No</th><th>품목</th><th>규격</th><th>단위</th><th>수량</th><th class="text-end">재료비단가</th><th class="text-end">재료비금액</th><th class="text-end">노무비단가</th><th class="text-end">노무비금액</th><th class="text-end">금액</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    return html;
+  } catch (e) {
+    return '';
+  }
+}
+
 /**
  * 🔐 관리자 비밀번호 확인
  * - password: 입력된 비밀번호
@@ -488,7 +1007,7 @@ function savePriceTableItems(category, itemsJson) {
   lock.waitLock(10000);
   
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet_();
     const sheetName = category + '(품목)';
     let sheet = ss.getSheetByName(sheetName);
     
@@ -547,7 +1066,7 @@ function savePriceTableItems(category, itemsJson) {
  * - 모든 단가표 시트가 자동으로 생성됩니다
  */
 function setupPriceTables() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet_();
   
   // 단가표 데이터 정의
   const priceTables = {
@@ -637,6 +1156,7 @@ function setupPriceTables() {
       ['타일세면대', '700*465*250', '개', 450000, 150000],
       ['휴젠트', 'FHD-P150S1', '개', 396000, 20000],
       ['힘펠천풍기', 'C2-100LF', '개', 49000, 15000],
+      ['하츠 티오람 미니 환풍기', '티오람 미니', '개', 0, 0],
       ['가벽', '폼세라믹', '장', 25000, 60000],
       ['큐비클', '', 'm²', 85000, 13000],
       ['유리부스', '', 'm²', 85000, 13000],
@@ -682,12 +1202,15 @@ function setupPriceTables() {
       ['걸레받이시공', '30cm 백색', 'm', 2500, 3500]
     ],
     
-    '도배필름공사(품목)': [
+    '도배공사(품목)': [
       ['품목', '규격', '단위', '재료비단가', '노무비단가'],
       ['도배', '', '평', 7000, 8000],
       ['실크', '', '평', 11000, 9000],
-      ['친환경도배', '', '평', 9000, 8000],
-      ['필름', '', '평', 12000, 10000]
+      ['친환경도배', '', '평', 9000, 8000]
+    ],
+    '필름공사(품목)': [
+      ['품목', '규격', '단위', '재료비단가', '노무비단가'],
+      ['필름', '', 'M', 12000, 10000]
     ],
     
     '바닥공사(품목)': [

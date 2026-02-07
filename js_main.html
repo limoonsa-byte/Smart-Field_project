@@ -89,6 +89,10 @@ function goScreen(screenId) {
     if (typeof initEstimateScreen === 'function') setTimeout(() => initEstimateScreen(), 50);
   }
 
+  if (screenId === 'schedule') {
+    if (typeof loadScheduleScreen === 'function') setTimeout(() => loadScheduleScreen(), 50);
+  }
+
   if (screenId === 'settings') {
     // 세팅 화면 진입 시 인증 확인
     if (typeof initSettingsScreen === 'function') setTimeout(() => initSettingsScreen(), 50);

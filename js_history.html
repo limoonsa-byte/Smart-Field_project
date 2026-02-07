@@ -92,12 +92,13 @@ function renderList(json) {
     card.onclick = () => openModal(item, isLightList);
 
     const date = item.date ? String(item.date).substring(0, 10) : '-';
+    const siteNameForAttr = String(item.siteName || 'NoName').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
     card.innerHTML = `
       <div class="card-body p-3 text-center">
         <h6 class="card-title text-truncate fw-bold mb-1">${item.siteName || 'NoName'}</h6>
         <p class="card-text text-secondary small mb-2">${date}</p>
-        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteItem('${(item.siteName || 'NoName').replace(/'/g, "\\'")}')">
+        <button type="button" class="btn btn-danger btn-sm btn-delete-drawing" data-site-name="${siteNameForAttr}">
           <i class="bi bi-trash"></i> 삭제
         </button>
       </div>
@@ -642,9 +643,6 @@ function createHistoryDOM() {
             <button class="btn btn-primary flex-grow-1 fw-bold py-3" onclick="editDrawingInEditor()">
               <i class="bi bi-pencil-square"></i> 수정하기
             </button>
-            <button class="btn btn-success flex-grow-1 fw-bold py-3" onclick="openViewer()">
-              <i class="bi bi-eye-fill"></i> 이미지 보기
-            </button>
             <button class="btn btn-warning flex-grow-1 fw-bold py-3" onclick="downloadDXF()">
               <i class="bi bi-filetype-dxf"></i> DXF 다운로드
             </button>
@@ -727,24 +725,86 @@ function editDrawingInEditor() {
 
 // ✅ 삭제 함수
 function deleteItem(siteName) {
-  if (!confirm(`⚠️ 정말 '${siteName}' 도면을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
+  if (!siteName || typeof siteName !== 'string') return;
+  const name = String(siteName).trim();
+  if (!name) return;
+  if (!confirm(`⚠️ 정말 '${name}' 도면을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) {
     return;
   }
 
   if (window.google && google.script && google.script.run) {
     google.script.run
-      .withSuccessHandler(res => {
-        alert(res);
-        loadList(); // 목록 새로고침
+      .withSuccessHandler(function(res) {
+        alert(res || '삭제되었습니다.');
+        // 삭제 반영 후 목록 새로고침 (짧은 지연으로 시트 반영 확보)
+        setTimeout(function() {
+          if (typeof loadList === 'function') loadList();
+        }, 400);
       })
-      .withFailureHandler(err => {
+      .withFailureHandler(function(err) {
         const msg = (err && err.message) ? err.message : String(err);
         alert('❌ 삭제 실패: ' + msg);
       })
-      .deleteFromSheet(siteName);
+      .deleteFromSheet(name);
   } else {
     alert('테스트 모드: 삭제 기능은 실제 환경에서만 작동합니다.');
   }
 }
+
+// ✅ 연결 확인 (서버가 사용 중인 스프레드시트/시트/B열 샘플 표시)
+function checkDrawingStorageConnection() {
+  if (!window.google || !google.script || !google.script.run) {
+    alert('테스트 모드: 서버 연결 없음');
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(msg) { alert(msg); })
+    .withFailureHandler(function(err) { alert('오류: ' + (err && err.message ? err.message : err)); })
+    .getDrawingStorageDiagnostics();
+}
+
+// ✅ 연결 안된 항목 정리: 현장별 최신 1행만 남기고 나머지 삭제 후 목록 새로고침
+function cleanupUnconnectedDrawings() {
+  if (!window.google || !google.script || !google.script.run) {
+    alert('테스트 모드: 서버 연결 없음');
+    return;
+  }
+  if (!confirm('도면보관함에서 현장별 "최신 1건"만 남기고, 중복·오래된 행을 삭제합니다. 계속할까요?')) return;
+  google.script.run
+    .withSuccessHandler(function(msg) {
+      alert(msg);
+      if (typeof loadList === 'function') loadList();
+    })
+    .withFailureHandler(function(err) { alert('오류: ' + (err && err.message ? err.message : err)); })
+    .deleteUnconnectedDrawingRows();
+}
+
+// ✅ 전역 노출
+window.deleteItem = deleteItem;
+window.loadList = loadList;
+window.checkDrawingStorageConnection = checkDrawingStorageConnection;
+window.cleanupUnconnectedDrawings = cleanupUnconnectedDrawings;
+
+// ✅ 삭제 버튼 클릭: 이벤트 위임으로 확실히 처리 (인라인 onclick 의존 제거)
+(function() {
+  function onListClick(e) {
+    var btn = e.target && (e.target.closest ? e.target.closest('.btn-delete-drawing') : (e.target.classList && e.target.classList.contains('btn-delete-drawing') ? e.target : null));
+    if (!btn) return;
+    var listContainer = document.getElementById('list-container');
+    if (!listContainer || !listContainer.contains(btn)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var name = btn.getAttribute('data-site-name');
+    if (name) deleteItem(name);
+  }
+  if (document.body) {
+    document.body.addEventListener('click', onListClick, true);
+  }
+  if (document.addEventListener && document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      if (document.body) document.body.addEventListener('click', onListClick, true);
+    });
+  }
+})();
 
 </script>
