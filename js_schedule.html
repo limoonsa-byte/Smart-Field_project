@@ -621,11 +621,9 @@ function schedulePrintPdf() {
   if (!calArea || !calArea.innerHTML.trim()) { alert('일정을 불러온 뒤 사용해 주세요.'); return; }
   var title = (currentScheduleSiteName || '일정') + ' - 일정 캘린더';
   var calCss = '<style>.schedule-calendar-wrap{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.08);border:1px solid #e0e0e0}.schedule-calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.schedule-calendar-title{font-size:1.15rem;font-weight:bold;color:#212529}.schedule-calendar-header .btn-outline-secondary{color:#495057;border-color:#dee2e6;background:#fff}.schedule-calendar-header .btn-outline-secondary:hover{background:#f8f9fa;border-color:#adb5bd}.schedule-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#dee2e6;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.schedule-day-cell{min-height:72px;background:#fff;padding:6px;display:flex;flex-direction:column;align-items:flex-end;border:1px solid #f1f3f5}.schedule-day-num{font-size:0.85rem;font-weight:600;margin-bottom:4px}.schedule-day-num.sunday{color:#dc3545}.schedule-day-num.saturday{color:#0d6efd}.schedule-day-num.weekday{color:#212529}.schedule-day-num.other-month{color:#adb5bd}.schedule-day-num.holiday{color:#fd7e14}.schedule-holiday-label{display:block;font-size:0.65rem;color:#fd7e14;margin-bottom:2px;font-weight:600}.schedule-task-card{font-size:0.7rem;padding:4px 8px;margin-top:3px;border-radius:6px;border:1px solid #e9ecef;background:#f8f9fa;color:#212529;text-align:left}.schedule-task-card::before{background:#6c757d}.schedule-task-card.today{background:#e7f1ff;border-color:#0d6efd}.schedule-weekday-header{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e9ecef;padding:8px 6px;text-align:center;font-size:0.75rem;font-weight:bold;color:#495057}</style>';
-  var win = window.open('', '_blank');
-  var header = '<div class="d-flex justify-content-between align-items-center mb-3"><h5 class="text-dark mb-0">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5><button type="button" onclick="window.print()" class="btn btn-primary btn-sm">인쇄 / PDF 저장</button></div>';
-  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escapeHtml(title) + '</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">' + calCss + '</head><body class="p-3 bg-white">' + header + calArea.innerHTML + '</body></html>');
-  win.document.close();
-  win.focus();
+  var header = '<div class="d-flex justify-content-between align-items-center mb-3"><h5 class="text-dark mb-0">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5></div>';
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escapeHtml(title) + '</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">' + calCss + '</head><body class="p-3 bg-white">' + header + calArea.innerHTML + '</body></html>';
+  showSchedulePdfInModal(html);
 }
 
 function scheduleEstimatePdf() {
@@ -638,18 +636,51 @@ function scheduleEstimatePdf() {
         return;
       }
       var calCss = '<style>.schedule-calendar-wrap{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.08);border:1px solid #e0e0e0}.schedule-calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.schedule-calendar-title{font-size:1.15rem;font-weight:bold;color:#212529}.schedule-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#dee2e6;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.schedule-day-cell{min-height:72px;background:#fff;padding:6px;display:flex;flex-direction:column;align-items:flex-end;border:1px solid #f1f3f5}.schedule-day-num{font-size:0.85rem;font-weight:600;margin-bottom:4px}.schedule-day-num.sunday{color:#dc3545}.schedule-day-num.saturday{color:#0d6efd}.schedule-day-num.weekday{color:#212529}.schedule-day-num.other-month{color:#adb5bd}.schedule-day-num.holiday{color:#fd7e14}.schedule-holiday-label{display:block;font-size:0.65rem;color:#fd7e14;margin-bottom:2px;font-weight:600}.schedule-task-card{font-size:0.7rem;padding:4px 8px;margin-top:3px;border-radius:6px;border:1px solid #e9ecef;background:#f8f9fa;color:#212529;text-align:left}.schedule-task-card.today{background:#e7f1ff;border-color:#0d6efd}.schedule-weekday-header{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e9ecef;padding:8px 6px;text-align:center;font-size:0.75rem;font-weight:bold;color:#495057}</style>';
-      var calHeader = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h5 style="margin:0;font-size:1.1rem">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5><button type="button" onclick="window.print()" style="padding:6px 12px;background:#0d6efd;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px">인쇄 / PDF 저장</button></div>';
+      var calHeader = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h5 style="margin:0;font-size:1.1rem">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5></div>';
       var calendarSection = '<div class="sheet" style="page-break-before:always;padding:16px"><h2 style="font-size:1.3em;margin-bottom:12px">일정 캘린더</h2>' + calCss + calHeader + calArea.innerHTML + '</div></body></html>';
       var fullHtml = estimateHtml.trim() + calendarSection;
-      var win = window.open('', '_blank');
-      win.document.write(fullHtml);
-      win.document.close();
-      win.focus();
+      showSchedulePdfInModal(fullHtml);
     })
     .withFailureHandler(function(err) {
       alert('견적서를 불러오는 중 오류가 났습니다. ' + (err && err.message ? err.message : ''));
     })
     .getEstimatePdfHtml(currentScheduleSiteName);
+}
+
+function showSchedulePdfInModal(html) {
+  var modalEl = document.getElementById('schedulePdfModal');
+  var iframeEl = document.getElementById('schedulePdfIframe');
+  if (modalEl && iframeEl) {
+    var doc = iframeEl.contentDocument || iframeEl.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    var printBtn = document.getElementById('schedulePdfPrintBtn');
+    if (printBtn) {
+      printBtn.onclick = function() {
+        try {
+          (iframeEl.contentWindow || iframeEl.contentDocument.defaultView).print();
+        } catch (e) {
+          alert('인쇄 실패: ' + (e.message || e));
+        }
+      };
+    }
+    var modal = new bootstrap.Modal(modalEl);
+    modal.show();
+  } else {
+    var win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+  }
+}
+
+function closeSchedulePdfModal() {
+  var modalEl = document.getElementById('schedulePdfModal');
+  if (modalEl && typeof bootstrap !== 'undefined') {
+    var modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
+  }
 }
 
 function escapeHtml(str) {
@@ -672,4 +703,5 @@ window.scheduleCalendarNextMonth = scheduleCalendarNextMonth;
 window.runScheduleAutoCalc = runScheduleAutoCalc;
 window.schedulePrintPdf = schedulePrintPdf;
 window.scheduleEstimatePdf = scheduleEstimatePdf;
+window.closeSchedulePdfModal = closeSchedulePdfModal;
 </script>
