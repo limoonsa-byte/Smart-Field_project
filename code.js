@@ -1,9 +1,122 @@
-function doGet() {
+function doGet(e) {
+  e = e || {};
+  var params = e.parameter || {};
+  if (params.downloadPdf && (params.fileId || params.siteName)) {
+    try {
+      var pdfBlob = null;
+      var fileName = '견적서.pdf';
+      if (params.fileId) {
+        var fileId = String(params.fileId || '').trim();
+        if (fileId) {
+          var file = DriveApp.getFileById(fileId);
+          pdfBlob = file.getBlob();
+          fileName = file.getName();
+        }
+      }
+      if (!pdfBlob && params.siteName) {
+        var gen = generateEstimatePdf_(decodeURIComponent(String(params.siteName || '').trim()));
+        if (gen && gen.blob) { pdfBlob = gen.blob; fileName = gen.name || fileName; }
+      }
+      if (!pdfBlob) {
+        if (params.format === 'json') {
+          return ContentService.createTextOutput(JSON.stringify({ error: 'no_sheet', message: '견적이 시트에 저장되지 않았습니다. 견적내기에서 "저장" 버튼을 눌러 먼저 저장한 뒤 PDF 저장을 시도해 주세요.' })).setMimeType(ContentService.MimeType.JSON);
+        }
+        return HtmlService.createHtmlOutput('<p>파일을 찾을 수 없습니다.</p>');
+      }
+      var b64 = Utilities.base64Encode(pdfBlob.getBytes());
+      var chunkSize = 32000;
+      var chunks = [];
+      for (var i = 0; i < b64.length; i += chunkSize) chunks.push(b64.substring(i, Math.min(i + chunkSize, b64.length)));
+      var fn = (fileName || '견적서.pdf').replace(/"/g, '').replace(/\\/g, '').replace(/</g, '').replace(/>/g, '');
+      if (params.format === 'json') {
+        return ContentService.createTextOutput(JSON.stringify({ chunks: chunks, name: fn })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var chunksJson = JSON.stringify(chunks);
+      var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>PDF 다운로드</title></head><body><p>다운로드 중...</p><script type="application/json" id="d">' + chunksJson + '</script><script>var c=JSON.parse(document.getElementById("d").textContent);var b=atob(c.join(""));var a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);var blob=new Blob([a],{type:"application/pdf"});var u=URL.createObjectURL(blob);var l=document.createElement("a");l.href=u;l.download="' + fn + '";l.click();document.body.innerHTML="<p>다운로드가 시작되었습니다.</p>";</script></body></html>';
+      return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    } catch (err) {
+      if (params.format === 'json') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'server', message: '다운로드 실패: ' + (err.message || err) })).setMimeType(ContentService.MimeType.JSON);
+      }
+      return HtmlService.createHtmlOutput('<p>다운로드 실패: ' + (err.message || err) + '</p>');
+    }
+  }
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
-    .setTitle('스마트 현장관리 V6.1')
+    .setTitle('스마트 현장관리 V7')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function doPost(e) {
+  e = e || {};
+  var params = e.parameter || {};
+  var isPdfFromData = params.downloadPdfFromData !== undefined && params.downloadPdfFromData !== '';
+  var formatHtml = params.format === 'html';
+  var formatJson = params.format === 'json';
+  if (isPdfFromData && (formatJson || formatHtml)) {
+    try {
+      var data = null;
+      if (params.payload) data = JSON.parse(params.payload);
+      else if (e.postData && e.postData.contents) data = JSON.parse(e.postData.contents);
+      if (!data || !data.items || !data.items.length) {
+        if (formatHtml) return HtmlService.createHtmlOutput('<p>견적 품목이 없습니다.</p>').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+        return ContentService.createTextOutput(JSON.stringify({ error: 'no_data', message: '견적 품목이 없습니다.' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var gen;
+      try {
+        gen = generateEstimatePdfFromData_(data);
+      } catch (genErr) {
+        if (formatHtml) return HtmlService.createHtmlOutput('<p>PDF 생성 실패: ' + String(genErr.message || genErr) + '</p>').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+        return ContentService.createTextOutput(JSON.stringify({ error: 'no_pdf', message: 'PDF 생성 실패: ' + String(genErr.message || genErr) })).setMimeType(ContentService.MimeType.JSON);
+      }
+      if (!gen || !gen.blob) {
+        if (formatHtml) return HtmlService.createHtmlOutput('<p>PDF 생성에 실패했습니다.</p>').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+        return ContentService.createTextOutput(JSON.stringify({ error: 'no_pdf', message: 'PDF 생성에 실패했습니다.' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var b64 = Utilities.base64Encode(gen.blob.getBytes());
+      var chunkSize = 32000;
+      var chunks = [];
+      for (var i = 0; i < b64.length; i += chunkSize) chunks.push(b64.substring(i, Math.min(i + chunkSize, b64.length)));
+      var fn = (gen.name || '견적서.pdf').replace(/"/g, '').replace(/\\/g, '').replace(/</g, '').replace(/>/g, '');
+      if (formatHtml) {
+        var chunksJson = JSON.stringify(chunks);
+        var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>PDF 다운로드</title></head><body><p>다운로드 중...</p><script type="application/json" id="d">' + chunksJson + '</script><script>var c=JSON.parse(document.getElementById("d").textContent);var b=atob(c.join(""));var a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);var blob=new Blob([a],{type:"application/pdf"});var u=URL.createObjectURL(blob);var l=document.createElement("a");l.href=u;l.download="' + fn + '";l.click();document.body.innerHTML="<p>다운로드가 시작되었습니다. 이 창을 닫아도 됩니다.</p>";</script></body></html>';
+        return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ chunks: chunks, name: fn })).setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      if (formatHtml) return HtmlService.createHtmlOutput('<p>오류: ' + String(err.message || err) + '</p>').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+      return ContentService.createTextOutput(JSON.stringify({ error: 'server', message: String(err.message || err) })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  if (params.sendEstimateEmail !== undefined && params.sendEstimateEmail !== '' && params.format === 'json') {
+    try {
+      var data = null;
+      if (e.postData && e.postData.contents) data = JSON.parse(e.postData.contents);
+      if (!data || !data.items || !data.items.length) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'no_data', message: '견적 품목이 없습니다.' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var gen;
+      try {
+        gen = generateEstimatePdfFromData_(data);
+      } catch (genErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'no_pdf', message: 'PDF 생성 실패: ' + String(genErr.message || genErr) })).setMimeType(ContentService.MimeType.JSON);
+      }
+      if (!gen || !gen.blob) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'no_pdf', message: 'PDF 생성에 실패했습니다.' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var fn = (gen.name || '견적서.pdf').replace(/[/\\?*:\[\]"]/g, '_');
+      gen.blob.setName(fn);
+      var subject = '견적서 - ' + (data.siteName || '현장');
+      var body = '견적서를 첨부합니다.\n\n현장: ' + (data.siteName || '') + '\n총액: ' + (data.total != null ? String(data.total) + '원' : '');
+      GmailApp.sendEmail('limoonsa@gmail.com', subject, body, { attachments: [gen.blob] });
+      return ContentService.createTextOutput(JSON.stringify({ ok: true, message: 'limoonsa@gmail.com으로 견적서를 발송했습니다.' })).setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'server', message: String(err.message || err) })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  return ContentService.createTextOutput(JSON.stringify({ error: 'bad_request' })).setMimeType(ContentService.MimeType.JSON);
 }
 
 /** HTML include */
@@ -1062,6 +1175,226 @@ function getEstimatePdfHtml(siteName) {
     return html;
   } catch (e) {
     return '';
+  }
+}
+
+/**
+ * 견적서 PDF Blob 생성 (내부 공통)
+ * @param {string} siteName - 현장명
+ * @returns {{ blob: Blob, name: string }} 또는 null
+ */
+function generateEstimatePdf_(siteName) {
+  try {
+    var ss = getSpreadsheet_();
+    if (!ss) return null;
+    var sheetName = '견적_' + sanitizeSheetName_(String(siteName || '').trim());
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return null;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 8) return null;
+    var data = sheet.getRange(1, 1, lastRow, 10).getValues();
+    var siteNameVal = siteName || '';
+    var areaVal = '';
+    if (data.length > 1) {
+      var r1 = data[1];
+      if (r1 && r1[1]) siteNameVal = String(r1[1]).trim();
+      if (r1 && r1[3]) areaVal = String(r1[3]).replace(/평/g, '').trim();
+    }
+    var headerRowIndex = -1;
+    for (var h = 0; h < Math.min(10, data.length); h++) {
+      if (String(data[h][0] || '').trim() === 'No') { headerRowIndex = h; break; }
+    }
+    if (headerRowIndex < 0) return null;
+    var categories = [], byCategory = {}, currentCat = null;
+    var subtotal = 0, overhead = 0, profit = 0, adjusted = 0, total = 0;
+    for (var r = headerRowIndex + 1; r < data.length; r++) {
+      var row = data[r];
+      var b1 = String(row[1] || '').trim();
+      var b9 = String(row[8] || '').trim();
+      if (b1.indexOf('■') === 0) {
+        currentCat = b1.replace(/^■\s*/, '').trim();
+        if (currentCat && byCategory[currentCat] === undefined) { categories.push(currentCat); byCategory[currentCat] = []; }
+        continue;
+      }
+      if (b1.indexOf(' 소계') !== -1) { currentCat = null; continue; }
+      if (currentCat && row[0] !== '' && row[0] != null && !isNaN(Number(row[0]))) byCategory[currentCat].push(row);
+      if (b9 === '소계') subtotal = Number(row[9]) || 0;
+      if (b9.indexOf('공과잡비') !== -1) overhead = Number(row[9]) || 0;
+      if (b9.indexOf('이윤') !== -1) profit = Number(row[9]) || 0;
+      if (b9.indexOf('조정액') !== -1) adjusted = Number(row[9]) || 0;
+      if (b9.indexOf('총액') !== -1) total = Number(row[9]) || 0;
+    }
+    var materialTotal = 0, laborTotal = 0;
+    var coverRows = [['순번', '품목', '단위', '수량', '재료비', '노무비', '금액', '비고']];
+    var coverRowNo = 0;
+    for (var c = 0; c < categories.length; c++) {
+      var cat = categories[c];
+      var items = byCategory[cat] || [];
+      if (items.length === 0) continue;
+      var catMat = 0, catLabor = 0, catSum = 0;
+      for (var i = 0; i < items.length; i++) {
+        catMat += Number(items[i][6]) || 0;
+        catLabor += Number(items[i][8]) || 0;
+        catSum += Number(items[i][9]) || 0;
+      }
+      materialTotal += catMat;
+      laborTotal += catLabor;
+      coverRowNo++;
+      coverRows.push([String(coverRowNo), cat, '식', '1', Math.round(catMat).toLocaleString(), Math.round(catLabor).toLocaleString(), Math.round(catSum).toLocaleString(), '']);
+    }
+    if (coverRows.length <= 1) coverRows.push(['1', '-', '식', '1', '0', '0', '0', '']);
+    coverRows.push(['', '', '', '소계', Math.round(materialTotal).toLocaleString(), Math.round(laborTotal).toLocaleString(), Math.round(subtotal).toLocaleString(), '']);
+    coverRows.push(['', '', '', '공과잡비(5%)', '', '', Math.round(overhead).toLocaleString(), '']);
+    coverRows.push(['', '', '', '이윤(10%)', '', '', Math.round(profit).toLocaleString(), '']);
+    coverRows.push(['', '', '', '조정액', '', '', Math.round(adjusted).toLocaleString(), '']);
+    var totalVal = total > 0 ? total : (subtotal + overhead + profit + adjusted);
+    coverRows.push(['', '', '', '총액 (VAT 별도)', '', '', Math.round(totalVal).toLocaleString() + '원', '']);
+    var now = new Date();
+    var writeDate = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    var doc = DocumentApp.create('견적서 - ' + siteNameVal);
+    var body = doc.getBody();
+    body.clear();
+    body.appendParagraph('견 적 서').setAlignment(DocumentApp.HorizontalAlignment.CENTER).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+    body.appendParagraph('공사 명 : ' + siteNameVal + '    견적일시: ' + writeDate);
+    body.appendTable(coverRows);
+    body.appendParagraph('').appendPageBreak();
+    body.appendParagraph('견적서 상세 내역').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    body.appendParagraph('현장명: ' + siteNameVal + '  |  평수: ' + areaVal + '평');
+    var detailRows = [['No', '품목', '규격', '단위', '수량', '재료비단가', '재료비금액', '노무비단가', '노무비금액', '금액']];
+    var no = 0;
+    for (var c = 0; c < categories.length; c++) {
+      var cat = categories[c];
+      var items = byCategory[cat] || [];
+      if (items.length === 0) continue;
+      for (var i = 0; i < items.length; i++) {
+        no++;
+        var it = items[i];
+        var qtyD = (it[4] != null && it[4] !== '') ? it[4] : '';
+        if (typeof qtyD === 'number' && String(it[1] || '').indexOf('단채움') !== -1) qtyD = Number(qtyD).toFixed(1);
+        detailRows.push([String(no), String(it[1] || ''), String(it[2] || ''), String(it[3] || ''), String(qtyD), Number(it[5]).toLocaleString(), Number(it[6]).toLocaleString(), Number(it[7]).toLocaleString(), Number(it[8]).toLocaleString(), Number(it[9]).toLocaleString()]);
+      }
+      var catSum = 0;
+      for (var i = 0; i < items.length; i++) catSum += Number(items[i][9]) || 0;
+      detailRows.push(['', cat + ' 소계', '', '', '', '', '', '', '', Math.round(catSum).toLocaleString() + '원']);
+    }
+    body.appendTable(detailRows);
+    doc.saveAndClose();
+    var pdfBlob = DriveApp.getFileById(doc.getId()).getAs('application/pdf');
+    var name = '견적서 - ' + siteNameVal + '.pdf';
+    pdfBlob.setName(name);
+    DriveApp.getFileById(doc.getId()).setTrashed(true);
+    return { blob: pdfBlob, name: name };
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 숫자 포맷 (GAS 호환) */
+function numFmt_(n) {
+  var x = Number(n);
+  if (isNaN(x)) return '0';
+  return (typeof x.toLocaleString === 'function') ? x.toLocaleString() : String(x);
+}
+function pad2_(n) {
+  n = Number(n);
+  return (n < 10 && n >= 0) ? '0' + n : String(n);
+}
+
+/**
+ * 견적 데이터(JSON)로 PDF Blob 생성 — 시트 저장 없이 현재 화면 기준
+ * @param {Object} data - { siteName, area, items: [{ category, item, spec, unit, qty, materialPrice, materialAmount, laborPrice, laborAmount, totalAmount }], subtotal, overhead, profit, adjusted, total }
+ * @returns {{ blob: Blob, name: string }} 또는 null
+ */
+function generateEstimatePdfFromData_(data) {
+  if (!data || !data.items || !data.items.length) return null;
+  var siteNameVal = String(data.siteName || '').trim() || '현장명 미지정';
+  var areaVal = String(data.area != null ? data.area : '').replace(/평/g, '').trim();
+  var categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+  var byCategory = {};
+  for (var ii = 0; ii < data.items.length; ii++) {
+    var it = data.items[ii];
+    var cat = String(it && it.category !== undefined ? it.category : '').trim() || '기타공사';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(it);
+  }
+  var subtotal = Number(data.subtotal) || 0;
+  var overhead = Number(data.overhead) || 0;
+  var profit = Number(data.profit) || 0;
+  var adjusted = Number(data.adjusted) || 0;
+  var total = Number(data.total) || (subtotal + overhead + profit);
+  var materialTotal = 0, laborTotal = 0;
+  var coverRows = [['순번', '품목', '단위', '수량', '재료비', '노무비', '금액', '비고']];
+  var coverRowNo = 0;
+  for (var c = 0; c < categoryOrder.length; c++) {
+    var cat = categoryOrder[c];
+    var items = byCategory[cat];
+    if (!items || items.length === 0) continue;
+    var catMat = 0, catLabor = 0, catSum = 0;
+    for (var i = 0; i < items.length; i++) {
+      catMat += Number(items[i].materialAmount) || 0;
+      catLabor += Number(items[i].laborAmount) || 0;
+      catSum += Number(items[i].totalAmount) || 0;
+    }
+    materialTotal += catMat;
+    laborTotal += catLabor;
+    coverRowNo++;
+    coverRows.push([String(coverRowNo), cat, '식', '1', numFmt_(Math.round(catMat)), numFmt_(Math.round(catLabor)), numFmt_(Math.round(catSum)), '']);
+  }
+  if (coverRows.length <= 1) coverRows.push(['1', '-', '식', '1', '0', '0', '0', '']);
+  coverRows.push(['', '', '', '소계', numFmt_(Math.round(materialTotal)), numFmt_(Math.round(laborTotal)), numFmt_(Math.round(subtotal)), '']);
+  coverRows.push(['', '', '', '공과잡비(5%)', '', '', numFmt_(Math.round(overhead)), '']);
+  coverRows.push(['', '', '', '이윤(10%)', '', '', numFmt_(Math.round(profit)), '']);
+  coverRows.push(['', '', '', '조정액', '', '', numFmt_(Math.round(adjusted)), '']);
+  var totalVal = total > 0 ? total : (subtotal + overhead + profit);
+  coverRows.push(['', '', '', '총액 (VAT 별도)', '', '', numFmt_(Math.round(totalVal)) + '원', '']);
+  var now = new Date();
+  var writeDate = now.getFullYear() + '-' + pad2_(now.getMonth() + 1) + '-' + pad2_(now.getDate());
+  var doc = DocumentApp.create('견적서 - ' + siteNameVal);
+  var body = doc.getBody();
+  body.clear();
+  body.appendParagraph('견 적 서').setAlignment(DocumentApp.HorizontalAlignment.CENTER).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph('공사 명 : ' + siteNameVal + '    견적일시: ' + writeDate);
+  body.appendTable(coverRows);
+  body.appendParagraph('').appendPageBreak();
+  body.appendParagraph('견적서 상세 내역').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendParagraph('현장명: ' + siteNameVal + '  |  평수: ' + areaVal + '평');
+  var detailRows = [['No', '품목', '규격', '단위', '수량', '재료비단가', '재료비금액', '노무비단가', '노무비금액', '금액']];
+  var no = 0;
+  for (var c = 0; c < categoryOrder.length; c++) {
+    var cat = categoryOrder[c];
+    var items = byCategory[cat];
+    if (!items || items.length === 0) continue;
+    for (var i = 0; i < items.length; i++) {
+      no++;
+      var it = items[i];
+      var qtyD = (it.qty != null && it.qty !== '') ? it.qty : '';
+      if (typeof qtyD === 'number' && String(it.item || '').indexOf('단채움') !== -1) qtyD = Number(qtyD).toFixed(1);
+      detailRows.push([String(no), String(it.item || ''), String(it.spec || ''), String(it.unit || ''), String(qtyD), numFmt_(it.materialPrice), numFmt_(it.materialAmount), numFmt_(it.laborPrice), numFmt_(it.laborAmount), numFmt_(it.totalAmount)]);
+    }
+    var catSum = 0;
+    for (var i = 0; i < items.length; i++) catSum += Number(items[i].totalAmount) || 0;
+    detailRows.push(['', cat + ' 소계', '', '', '', '', '', '', '', numFmt_(Math.round(catSum)) + '원']);
+  }
+  body.appendTable(detailRows);
+  doc.saveAndClose();
+  var pdfBlob = DriveApp.getFileById(doc.getId()).getAs('application/pdf');
+  var name = '견적서 - ' + siteNameVal + '.pdf';
+  pdfBlob.setName(name);
+  DriveApp.getFileById(doc.getId()).setTrashed(true);
+  return { blob: pdfBlob, name: name };
+}
+
+/**
+ * 견적서 PDF를 Google Drive에 저장하고 링크 반환 (태블릿/스마트폰용)
+ */
+function saveEstimatePdfToDrive(siteName) {
+  try {
+    var gen = generateEstimatePdf_(siteName);
+    if (!gen || !gen.blob) return null;
+    var pdfFile = DriveApp.getRootFolder().createFile(gen.blob);
+    return { url: pdfFile.getUrl(), id: pdfFile.getId(), name: pdfFile.getName() };
+  } catch (e) {
+    return null;
   }
 }
 

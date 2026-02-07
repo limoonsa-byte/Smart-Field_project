@@ -2106,55 +2106,65 @@ function exportEstimatePDF() {
   }
   
   
-  const html = `<!DOCTYPE html>
+  let html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <title>견적서 - ${escapeHtml(estimateSettings.siteName || '현장명')}</title>
   <style>
-    body { font-family: Malgun Gothic, sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
-    .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; position: relative; }
-    .attachment-label { position: absolute; top: 12mm; left: 12mm; font-size: 0.9em; color: #666; }
+    html { background: #fff !important; color-scheme: light; }
+    body { font-family: Malgun Gothic, sans-serif; margin: 0; padding: 0; box-sizing: border-box; color: #000; background: #fff !important; }
+    .sheet { width: 273mm; min-height: 186mm; padding: 12mm; margin: 0 auto; box-sizing: border-box; position: relative; background: #fff !important; }
+    .attachment-label { position: absolute; top: 12mm; left: 12mm; font-size: 0.9em; color: #000; }
     .cover-title { font-size: 2em; font-weight: bold; text-align: center; margin: 20px 0 25px 0; letter-spacing: 0.1em; }
     .cover-project-name { font-size: 1.1em; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
-    .cover-project-label { font-weight: bold; margin-right: 10px; }
-    .cover-date-section { font-size: 0.95em; }
+    .cover-project-label { font-weight: bold; margin-right: 10px; color: #000; }
+    .cover-date-section { font-size: 0.95em; color: #000; }
     .cover-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 10pt; }
-    .cover-table th, .cover-table td { border: 1px solid #333; padding: 6px 8px; text-align: center; }
-    .cover-table th { background: #eee; font-weight: bold; }
+    .cover-table th, .cover-table td { border: 1px solid #000; padding: 6px 8px; text-align: center; color: #000; }
+    .cover-table th { background: #eee; font-weight: bold; color: #000; }
     .cover-table td.text-end { text-align: right; }
-    .cover-category-subtotal { background: #f5f5f5; font-weight: bold; }
-    .cover-total-row { background: #e6f3ff; font-weight: bold; font-size: 1.05em; }
+    .cover-category-subtotal { background: #f5f5f5; font-weight: bold; color: #000; }
+    .cover-subtotal-row { background: #f5f5f5; font-weight: bold; color: #000; }
+    .cover-total-row { background: #e6f3ff; font-weight: bold; font-size: 1.05em; color: #000; }
     .page-watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 8em; color: rgba(0,0,0,0.05); font-weight: bold; pointer-events: none; z-index: -1; }
     h1 { font-size: 1.4em; margin: 0 0 6px 0; }
-    .info { margin-bottom: 10px; color: #333; font-size: 0.95em; }
+    .info { margin-bottom: 10px; color: #000; font-size: 0.95em; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; font-size: 10pt; }
-    th, td { border: 1px solid #333; padding: 4px 6px; text-align: left; overflow: hidden; }
-    th { background: #eee; font-weight: bold; }
+    th, td { border: 1px solid #000; padding: 4px 6px; text-align: left; overflow: hidden; color: #000; }
+    th { background: #eee; font-weight: bold; color: #000; }
     .text-end { text-align: right; }
-    tr.section-header td { background: #e0e0e0; font-size: 1em; font-weight: bold; padding: 5px 6px; }
-    tr.category-subtotal td { background: #f5f5f5; font-weight: bold; }
+    tr.section-header td { background: #e0e0e0; font-size: 1em; font-weight: bold; padding: 5px 6px; color: #000; }
+    tr.category-subtotal td { background: #f5f5f5; font-weight: bold; color: #000; }
     .summary { margin-top: 8px; }
     .summary td { border: none; padding: 2px 6px; }
     .total-row { font-weight: bold; font-size: 1.05em; }
-    .preview-actions { margin-top: 20px; padding: 12px; border-top: 1px solid #ccc; display: flex; gap: 12px; }
-    .btn-print, .btn-close { padding: 10px 20px; font-size: 14px; cursor: pointer; border-radius: 6px; border: 1px solid #333; }
-    .btn-print { background: #0d6efd; color: #fff; border-color: #0d6efd; }
-    .btn-print:hover { background: #0b5ed7; }
-    .btn-close { background: #fff; color: #333; }
-    .btn-close:hover { background: #f0f0f0; }
     @media print {
       @page { size: 297mm 210mm; margin: 12mm; }
-      body { width: 100%; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .sheet { width: 273mm; min-height: auto; padding: 0; margin: 0; }
-      .preview-actions, .print-hint { display: none !important; }
-      .cover-page { page-break-after: always; }
+      /* PC/모바일 동일 인쇄: 고정 폭으로 같은 레이아웃 출력 */
+      html { width: 297mm !important; min-width: 297mm !important; max-width: 297mm !important; -webkit-text-size-adjust: 100%; background: #fff !important; }
+      body { width: 297mm !important; min-width: 297mm !important; max-width: 297mm !important; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; transform: none !important; background: #fff !important; }
+      .sheet { width: 273mm !important; max-width: none !important; min-height: auto; padding: 0; margin: 0; }
+      /* 표지(1페이지)와 상세 내역(2페이지) 인쇄 시 한 장에 붙이기 (테블릿 인쇄 시 분리 방지) */
+      .cover-page { page-break-after: avoid; }
+      .sheet.detail-sheet { page-break-before: avoid; }
+      /* 표지 1페이지: 총액이 2페이지로 넘어가지 않도록 컴팩트 + 소계~총액 블록 분리 방지 */
+      .cover-first-page .cover-title { margin: 8px 0 10px 0; font-size: 1.6em; }
+      .cover-first-page .cover-project-name { margin-bottom: 6px; font-size: 0.95em; }
+      .cover-first-page .cover-table { margin: 6px 0; font-size: 8.5pt; }
+      .cover-first-page .cover-table th, .cover-first-page .cover-table td { padding: 3px 5px; }
+      .cover-summary-block { page-break-inside: avoid; break-inside: avoid; }
+      /* 상세 내역 시작부도 컴팩트하게 해서 표지와 한 페이지에 들어가도록 */
+      .detail-sheet h1 { font-size: 1.2em; margin: 0 0 4px 0; }
+      .detail-sheet .info { margin-bottom: 6px; font-size: 0.9em; }
+      .detail-sheet table { font-size: 9pt; }
+      .detail-sheet th, .detail-sheet td { padding: 3px 5px; }
     }
   </style>
 </head>
 <body>
-<!-- 표지 (갑지) -->
-<div class="sheet" style="page-break-after: always;">
+<!-- 표지 (갑지) - 인쇄 시 총액이 1페이지에 오도록 cover-first-page + cover-summary-block 적용 -->
+<div class="sheet cover-page cover-first-page">
   <div class="attachment-label">별첨1</div>
   <div class="page-watermark">1 페이지</div>
   
@@ -2182,9 +2192,9 @@ function exportEstimatePDF() {
         <th style="width: 6%;">비고</th>
       </tr>
     </thead>
-    <tbody>
-      ${coverRows}
-      <tr>
+    <tbody>${coverRows}</tbody>
+    <tbody class="cover-summary-block">
+      <tr class="cover-subtotal-row">
         <td colspan="4" class="text-end" style="text-align: right; padding-right: 10px;">소계</td>
         <td class="text-end">${materialTotal.toLocaleString()}</td>
         <td class="text-end">${laborTotal.toLocaleString()}</td>
@@ -2223,8 +2233,8 @@ function exportEstimatePDF() {
   </table>
 </div>
 
-<!-- 세부 내역 -->
-<div class="sheet">
+<!-- 세부 내역 (인쇄 시 표지와 한 페이지에 붙도록 detail-sheet) -->
+<div class="sheet detail-sheet">
   <h1>견적서 상세 내역</h1>
   <div class="info">
     <strong>현장명:</strong> ${escapeHtml(estimateSettings.siteName || '-')} &nbsp;|&nbsp;
@@ -2241,33 +2251,189 @@ function exportEstimatePDF() {
     </thead>
     <tbody>${rows}</tbody>
   </table>
-  <p class="print-hint" style="margin-top:16px;padding:10px;background:#fff3cd;border-radius:6px;font-size:14px;">
-    <strong>가로 인쇄:</strong> 위쪽 또는 아래 버튼 클릭 후 인쇄 창에서 <strong>방향 → 가로</strong>를 선택한 뒤 PDF로 저장하세요.
-  </p>
-  <div class="preview-actions">
-    <button type="button" onclick="typeof window.print==='function'&&window.print();" class="btn-print">인쇄하여 PDF로 저장</button>
-    <button type="button" onclick="if(window.parent&&window.parent.closePdfPreviewModal){window.parent.closePdfPreviewModal();}else if(window.close){window.close();}" class="btn-close">닫기</button>
-  </div>
 </div>
 </body>
 </html>`;
+  html = html.replace(/<p[^>]*class="[^"]*print-hint[^"]*"[^>]*>[\s\S]*?<\/p>/gi, '');
+  html = html.replace(/<div[^>]*class="[^"]*preview-actions[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi, '');
+  html = html.replace(/<p[^>]*>[\s\S]*?가로\s*인쇄[\s\S]*?<\/p>/gi, '');
+  html = html.replace(/<div[^>]*>[\s\S]*?<button[^>]*>[\s\S]*?인쇄[\s\S]*?<\/button>[\s\S]*?<button[^>]*>[\s\S]*?닫기[\s\S]*?<\/button>[\s\S]*?<\/div>\s*/gi, '');
   
   // 앱 내부 모달에서 열기
   const modalEl = document.getElementById('pdfPreviewModal');
   const iframeEl = document.getElementById('pdfPreviewIframe');
   if (modalEl && iframeEl) {
+    if (window.innerWidth <= 768) {
+      html = html.replace('<head>', '<head><meta name="viewport" content="width=1032">');
+    }
+    window.__lastEstimatePdfHtml = html;
+    window.__lastEstimateSiteName = (typeof estimateSettings !== 'undefined' && estimateSettings && estimateSettings.siteName) ? estimateSettings.siteName : '';
+    var footer = document.getElementById('pdfPreviewModalFooter') || modalEl.querySelector('.modal-footer');
+    if (footer) {
+      footer.innerHTML = ''
+        + '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>'
+        + '<button type="button" class="btn btn-outline-primary" id="pdfPreviewPrintBtn"><i class="bi bi-printer me-1"></i>인쇄</button>'
+        + '<button type="button" class="btn btn-primary" id="pdfPreviewSavePdfBtn"><i class="bi bi-file-earmark-pdf me-1"></i>PDF 저장</button>';
+    }
     const doc = iframeEl.contentDocument || iframeEl.contentWindow.document;
     doc.open();
     doc.write(html);
     doc.close();
-    // 인쇄 버튼: iframe 내용만 인쇄
-    const printBtn = document.getElementById('pdfPreviewPrintBtn');
+    var doSavePdf = function() {
+      if (!estimateItems || estimateItems.length === 0) {
+        alert('저장할 견적 품목이 없습니다.');
+        return;
+      }
+      if (typeof jspdf === 'undefined' || !jspdf.jsPDF) {
+        alert('PDF 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      var saveBtn = document.getElementById('pdfPreviewSavePdfBtn');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>PDF 생성 중...'; }
+      var FONT_URL = 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf';
+      var categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+      var byCategory = {};
+      estimateItems.forEach(function(item) {
+        var cat = item.category || '기타공사';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push(item);
+      });
+      var totals = calculateTotals();
+      var materialTotal = estimateItems.reduce(function(s, item) { return s + (Number(item.materialAmount) || 0); }, 0);
+      var laborTotal = estimateItems.reduce(function(s, item) { return s + (Number(item.laborAmount) || 0); }, 0);
+      var now = new Date();
+      var writeDate = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      var siteName = (estimateSettings && estimateSettings.siteName) ? String(estimateSettings.siteName) : '견적서';
+      var pdfDoc = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      function toBase64(buf) {
+        var bytes = new Uint8Array(buf);
+        var binary = '';
+        for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+      }
+      function addFontToDoc(doc, base64) {
+        doc.addFileToVFS('NotoSansKR.ttf', base64);
+        doc.addFont('NotoSansKR.ttf', 'NotoSansKR', 'normal');
+      }
+      function addKoreanFontThenBuild() {
+        if (window.__jspdfKoreanFontBase64) {
+          addFontToDoc(pdfDoc, window.__jspdfKoreanFontBase64);
+          buildPdf(pdfDoc);
+          return;
+        }
+        fetch(FONT_URL, { mode: 'cors' }).then(function(r) {
+          if (!r.ok) throw new Error('Font load failed');
+          return r.arrayBuffer();
+        }).then(function(buf) {
+          var b64 = toBase64(buf);
+          window.__jspdfKoreanFontBase64 = b64;
+          addFontToDoc(pdfDoc, b64);
+          buildPdf(pdfDoc);
+        }).catch(function(err) {
+          alert('한글 폰트를 불러오지 못했습니다. 네트워크(Wi-Fi/데이터)를 확인한 뒤 다시 시도해 주세요.');
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="bi bi-file-earmark-pdf me-1"></i>PDF 저장'; }
+        });
+      }
+      var black = [0, 0, 0];
+      function numFmt(n) { var x = Number(n); if (isNaN(x)) return ''; return x.toLocaleString(); }
+      function buildPdf(doc) {
+        doc.setFont('NotoSansKR', 'normal');
+        doc.setTextColor(black[0], black[1], black[2]);
+        doc.setFontSize(20);
+        doc.text('견 적 서', 148, 15, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text('공사 명 : ' + siteName + '    견적일시: ' + writeDate, 14, 22);
+        var coverHead = [['순번', '품목', '단위', '수량', '재료비', '노무비', '금액', '비고']];
+        var coverBody = [];
+        var coverRowNo = 0;
+        categoryOrder.forEach(function(cat) {
+          var items = byCategory[cat];
+          if (!items || items.length === 0) return;
+          coverRowNo++;
+          var catSum = items.reduce(function(s, it) { return s + (Number(it.totalAmount) || 0); }, 0);
+          var catMat = items.reduce(function(s, it) { return s + (Number(it.materialAmount) || 0); }, 0);
+          var catLab = items.reduce(function(s, it) { return s + (Number(it.laborAmount) || 0); }, 0);
+          coverBody.push([String(coverRowNo), cat, '식', '1', numFmt(catMat), numFmt(catLab), numFmt(catSum), '']);
+        });
+        coverBody.push(['', '', '', '소계', numFmt(materialTotal), numFmt(laborTotal), numFmt(totals.subtotal), '']);
+        coverBody.push(['', '', '', '공과잡비(5%)', '', '', numFmt(totals.overhead), '']);
+        coverBody.push(['', '', '', '이윤(10%)', '', '', numFmt(totals.profit), '']);
+        coverBody.push(['', '', '', '조정액', '', '', numFmt(totals.adjusted), '']);
+        coverBody.push(['', '', '', '총액 (VAT 별도)', '', '', numFmt(totals.total) + '원', '']);
+        var subtotalRowIndex = coverBody.length - 5;
+        var totalRowIndex = coverBody.length - 1;
+        doc.autoTable({
+          head: coverHead, body: coverBody, startY: 26, theme: 'grid',
+          styles: { font: 'NotoSansKR', fontSize: 9, textColor: black },
+          headStyles: { fillColor: [200, 200, 200], font: 'NotoSansKR', fontSize: 10, textColor: black },
+          didParseCell: function(data) {
+            if (data.section === 'body') {
+              if (data.row.index === subtotalRowIndex) {
+                data.cell.styles.fillColor = [245, 245, 245];
+                data.cell.styles.textColor = black;
+              } else if (data.row.index === totalRowIndex) {
+                data.cell.styles.fillColor = [230, 243, 255];
+                data.cell.styles.textColor = black;
+              }
+            }
+          }
+        });
+        var finalY = doc.lastAutoTable.finalY || 26;
+        if (finalY > 180) { doc.addPage('a4', 'l'); finalY = 15; }
+        doc.setFont('NotoSansKR', 'normal');
+        doc.setFontSize(14);
+        doc.text('견적서 상세 내역', 14, finalY + 8);
+        doc.setFontSize(9);
+        var areaVal = (estimateSettings && estimateSettings.area != null) ? String(estimateSettings.area) : '-';
+        var heightVal = (currentDrawing && currentDrawing.height) ? currentDrawing.height : 2300;
+        doc.text('현장명: ' + siteName + '  |  평수: ' + areaVal + '평  |  천장고: ' + heightVal + 'mm', 14, finalY + 14);
+        var detailHead = [['No', '품목', '규격', '단위', '수량', '재료비단가', '재료비금액', '노무비단가', '노무비금액', '금액']];
+        var detailBody = [];
+        var no = 0;
+        categoryOrder.forEach(function(cat) {
+          var items = byCategory[cat];
+          if (!items || items.length === 0) return;
+          detailBody.push(['', '■ ' + cat, '', '', '', '', '', '', '', '']);
+          items.forEach(function(it) {
+            no++;
+            var qtyD = (it.category === '설비공사' && it.item === '단채움') ? Number(it.qty).toFixed(1) : it.qty;
+            detailBody.push([
+              String(no), it.item || '', it.spec || '-', it.unit || '', String(qtyD),
+              numFmt(it.materialPrice), numFmt(it.materialAmount), numFmt(it.laborPrice), numFmt(it.laborAmount), numFmt(it.totalAmount)
+            ]);
+          });
+          var catSum = items.reduce(function(s, it) { return s + (Number(it.totalAmount) || 0); }, 0);
+          detailBody.push(['', cat + ' 소계', '', '', '', '', '', '', '', numFmt(catSum) + '원']);
+        });
+        doc.autoTable({
+          head: detailHead, body: detailBody, startY: finalY + 18, theme: 'grid',
+          styles: { font: 'NotoSansKR', fontSize: 8, textColor: black },
+          headStyles: { fillColor: [200, 200, 200], font: 'NotoSansKR', fontSize: 9, textColor: black },
+          didParseCell: function(data) {
+            if (data.section === 'body' && data.row.raw && data.row.raw[1] && String(data.row.raw[1]).indexOf(' 소계') !== -1) {
+              data.cell.styles.fillColor = [245, 245, 245];
+              data.cell.styles.textColor = black;
+            }
+          }
+        });
+        var fileName = '견적서 - ' + siteName.replace(/[/\\?*:\[\]"]/g, '_') + '.pdf';
+        doc.save(fileName);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="bi bi-file-earmark-pdf me-1"></i>PDF 저장'; }
+      }
+      addKoreanFontThenBuild();
+    };
+    var savePdfBtn = document.getElementById('pdfPreviewSavePdfBtn');
+    if (savePdfBtn) savePdfBtn.onclick = doSavePdf;
+    var printBtn = document.getElementById('pdfPreviewPrintBtn');
     if (printBtn) {
       printBtn.onclick = function() {
         try {
-          (iframeEl.contentWindow || iframeEl.contentDocument.defaultView).print();
+          if (iframeEl.contentWindow) {
+            iframeEl.contentWindow.focus();
+            iframeEl.contentWindow.print();
+          }
         } catch (e) {
-          alert('인쇄 실패: ' + (e.message || e));
+          alert('인쇄를 열 수 없습니다.');
         }
       };
     }
@@ -2355,4 +2521,120 @@ function exportEstimateExcel() {
   link.click();
   URL.revokeObjectURL(link.href);
 }
+
+/** 일정 화면 등에서 견적 데이터로 PDF 페이지만 채울 때 사용 (jsPDF doc에 견적서 표지+상세 추가, save는 호출 쪽에서) */
+window.buildEstimatePdfFromData = function(data, pdfDoc, done) {
+  if (!data || !pdfDoc || typeof done !== 'function') return;
+  var categoryOrder = ['가설철거', '목공사', '전기공사', '설비공사', '화장실공사', '도배공사', '필름공사', '바닥공사', '싱크가구공사', '도장공사', '금속유리공사', '기타공사'];
+  var byCategory = {};
+  (data.items || []).forEach(function(item) {
+    var cat = item.category || '기타공사';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  });
+  var materialTotal = (data.items || []).reduce(function(s, item) { return s + (Number(item.materialAmount) || 0); }, 0);
+  var laborTotal = (data.items || []).reduce(function(s, item) { return s + (Number(item.laborAmount) || 0); }, 0);
+  var totals = { subtotal: Number(data.subtotal) || 0, overhead: Number(data.overhead) || 0, profit: Number(data.profit) || 0, adjusted: Number(data.adjusted) || 0, total: Number(data.total) || 0 };
+  var now = new Date();
+  var writeDate = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  var siteName = String(data.siteName || '견적서');
+  var areaVal = data.area != null ? String(data.area) : '-';
+  var heightVal = 2300;
+  var black = [0, 0, 0];
+  function numFmt(n) { var x = Number(n); if (isNaN(x)) return ''; return x.toLocaleString(); }
+  function addFontAndBuild() {
+    if (window.__jspdfKoreanFontBase64) {
+      pdfDoc.addFileToVFS('NotoSansKR.ttf', window.__jspdfKoreanFontBase64);
+      pdfDoc.addFont('NotoSansKR.ttf', 'NotoSansKR', 'normal');
+      build();
+      return;
+    }
+    var FONT_URL = 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf';
+    fetch(FONT_URL, { mode: 'cors' }).then(function(r) { if (!r.ok) throw new Error(); return r.arrayBuffer(); }).then(function(buf) {
+      var bytes = new Uint8Array(buf);
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      window.__jspdfKoreanFontBase64 = btoa(binary);
+      pdfDoc.addFileToVFS('NotoSansKR.ttf', window.__jspdfKoreanFontBase64);
+      pdfDoc.addFont('NotoSansKR.ttf', 'NotoSansKR', 'normal');
+      build();
+    }).catch(function() { done(); });
+  }
+  function build() {
+    pdfDoc.setFont('NotoSansKR', 'normal');
+    pdfDoc.setTextColor(black[0], black[1], black[2]);
+    pdfDoc.setFontSize(20);
+    pdfDoc.text('견 적 서', 148, 15, { align: 'center' });
+    pdfDoc.setFontSize(10);
+    pdfDoc.text('공사 명 : ' + siteName + '    견적일시: ' + writeDate, 14, 22);
+    var coverHead = [['순번', '품목', '단위', '수량', '재료비', '노무비', '금액', '비고']];
+    var coverBody = [];
+    var coverRowNo = 0;
+    categoryOrder.forEach(function(cat) {
+      var items = byCategory[cat];
+      if (!items || items.length === 0) return;
+      coverRowNo++;
+      var catSum = items.reduce(function(s, it) { return s + (Number(it.totalAmount) || 0); }, 0);
+      var catMat = items.reduce(function(s, it) { return s + (Number(it.materialAmount) || 0); }, 0);
+      var catLab = items.reduce(function(s, it) { return s + (Number(it.laborAmount) || 0); }, 0);
+      coverBody.push([String(coverRowNo), cat, '식', '1', numFmt(catMat), numFmt(catLab), numFmt(catSum), '']);
+    });
+    coverBody.push(['', '', '', '소계', numFmt(materialTotal), numFmt(laborTotal), numFmt(totals.subtotal), '']);
+    coverBody.push(['', '', '', '공과잡비(5%)', '', '', numFmt(totals.overhead), '']);
+    coverBody.push(['', '', '', '이윤(10%)', '', '', numFmt(totals.profit), '']);
+    coverBody.push(['', '', '', '조정액', '', '', numFmt(totals.adjusted), '']);
+    coverBody.push(['', '', '', '총액 (VAT 별도)', '', '', numFmt(totals.total) + '원', '']);
+    var subtotalRowIndex = coverBody.length - 5;
+    var totalRowIndex = coverBody.length - 1;
+    pdfDoc.autoTable({
+      head: coverHead, body: coverBody, startY: 26, theme: 'grid',
+      styles: { font: 'NotoSansKR', fontSize: 9, textColor: black },
+      headStyles: { fillColor: [200, 200, 200], font: 'NotoSansKR', fontSize: 10, textColor: black },
+      didParseCell: function(cellData) {
+        if (cellData.section === 'body') {
+          if (cellData.row.index === subtotalRowIndex) { cellData.cell.styles.fillColor = [245, 245, 245]; cellData.cell.styles.textColor = black; }
+          else if (cellData.row.index === totalRowIndex) { cellData.cell.styles.fillColor = [230, 243, 255]; cellData.cell.styles.textColor = black; }
+        }
+      }
+    });
+    var finalY = pdfDoc.lastAutoTable.finalY || 26;
+    if (finalY > 180) { pdfDoc.addPage('a4', 'l'); finalY = 15; }
+    pdfDoc.setFont('NotoSansKR', 'normal');
+    pdfDoc.setFontSize(14);
+    pdfDoc.text('견적서 상세 내역', 14, finalY + 8);
+    pdfDoc.setFontSize(9);
+    pdfDoc.text('현장명: ' + siteName + '  |  평수: ' + areaVal + '평  |  천장고: ' + heightVal + 'mm', 14, finalY + 14);
+    var detailHead = [['No', '품목', '규격', '단위', '수량', '재료비단가', '재료비금액', '노무비단가', '노무비금액', '금액']];
+    var detailBody = [];
+    var no = 0;
+    categoryOrder.forEach(function(cat) {
+      var items = byCategory[cat];
+      if (!items || items.length === 0) return;
+      detailBody.push(['', '■ ' + cat, '', '', '', '', '', '', '', '']);
+      items.forEach(function(it) {
+        no++;
+        var qtyD = (it.category === '설비공사' && it.item === '단채움') ? Number(it.qty).toFixed(1) : it.qty;
+        detailBody.push([
+          String(no), it.item || '', it.spec || '-', it.unit || '', String(qtyD),
+          numFmt(it.materialPrice), numFmt(it.materialAmount), numFmt(it.laborPrice), numFmt(it.laborAmount), numFmt(it.totalAmount)
+        ]);
+      });
+      var catSum = items.reduce(function(s, it) { return s + (Number(it.totalAmount) || 0); }, 0);
+      detailBody.push(['', cat + ' 소계', '', '', '', '', '', '', '', numFmt(catSum) + '원']);
+    });
+    pdfDoc.autoTable({
+      head: detailHead, body: detailBody, startY: finalY + 18, theme: 'grid',
+      styles: { font: 'NotoSansKR', fontSize: 8, textColor: black },
+      headStyles: { fillColor: [200, 200, 200], font: 'NotoSansKR', fontSize: 9, textColor: black },
+      didParseCell: function(cellData) {
+        if (cellData.section === 'body' && cellData.row.raw && cellData.row.raw[1] && String(cellData.row.raw[1]).indexOf(' 소계') !== -1) {
+          cellData.cell.styles.fillColor = [245, 245, 245];
+          cellData.cell.styles.textColor = black;
+        }
+      }
+    });
+    done();
+  }
+  addFontAndBuild();
+};
 </script>

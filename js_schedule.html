@@ -182,12 +182,14 @@ function renderScheduleTable(wrap, siteName, savedRows, options) {
   }
   var totalSum = materialTotal + laborTotal;
   var laborHint = (laborTotal <= 0 && materialTotal <= 0) ? '<p class="text-warning small mb-0 mt-2">노무비·재료비가 없으면 견적 내기에서 해당 현장으로 견적 작성 후 <strong>서버 저장</strong>을 한 뒤 다시 불러오세요.</p>' : '';
-  var laborBlock = '<div class="mb-3 p-3 bg-dark border border-secondary rounded">' +
+  var laborBlock = '<div class="mb-3 p-3 bg-dark border border-secondary rounded schedule-labor-block">' +
     '<label class="form-label text-white small mb-2">공정별 재료비·노무비 (견적서 기준)</label>' +
-    '<table class="table table-dark table-bordered table-sm mb-0">' +
+    '<div class="schedule-labor-table-wrap">' +
+    '<table class="table table-dark table-bordered table-sm mb-0 schedule-labor-table">' +
     '<thead><tr><th>공정</th><th class="text-end">재료비</th><th class="text-end">노무비</th><th class="text-end">합계</th></tr></thead><tbody>' +
     laborRows +
     '<tr class="table-secondary"><td class="fw-bold">합계</td><td class="text-end fw-bold">' + Number(materialTotal).toLocaleString() + '원</td><td class="text-end fw-bold">' + Number(laborTotal).toLocaleString() + '원</td><td class="text-end fw-bold">' + Number(totalSum).toLocaleString() + '원</td></tr></tbody></table>' +
+    '</div>' +
     laborHint + '</div>';
 
   var ruleBlock = '<div class="mb-3 p-3 bg-dark border border-secondary rounded">' +
@@ -623,7 +625,8 @@ function schedulePrintPdf() {
   var calCss = '<style>.schedule-calendar-wrap{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.08);border:1px solid #e0e0e0}.schedule-calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.schedule-calendar-title{font-size:1.15rem;font-weight:bold;color:#212529}.schedule-calendar-header .btn-outline-secondary{color:#495057;border-color:#dee2e6;background:#fff}.schedule-calendar-header .btn-outline-secondary:hover{background:#f8f9fa;border-color:#adb5bd}.schedule-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#dee2e6;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.schedule-day-cell{min-height:72px;background:#fff;padding:6px;display:flex;flex-direction:column;align-items:flex-end;border:1px solid #f1f3f5}.schedule-day-num{font-size:0.85rem;font-weight:600;margin-bottom:4px}.schedule-day-num.sunday{color:#dc3545}.schedule-day-num.saturday{color:#0d6efd}.schedule-day-num.weekday{color:#212529}.schedule-day-num.other-month{color:#adb5bd}.schedule-day-num.holiday{color:#fd7e14}.schedule-holiday-label{display:block;font-size:0.65rem;color:#fd7e14;margin-bottom:2px;font-weight:600}.schedule-task-card{font-size:0.7rem;padding:4px 8px;margin-top:3px;border-radius:6px;border:1px solid #e9ecef;background:#f8f9fa;color:#212529;text-align:left}.schedule-task-card::before{background:#6c757d}.schedule-task-card.today{background:#e7f1ff;border-color:#0d6efd}.schedule-weekday-header{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e9ecef;padding:8px 6px;text-align:center;font-size:0.75rem;font-weight:bold;color:#495057}</style>';
   var header = '<div class="d-flex justify-content-between align-items-center mb-3"><h5 class="text-dark mb-0">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5></div>';
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escapeHtml(title) + '</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">' + calCss + '</head><body class="p-3 bg-white">' + header + calArea.innerHTML + '</body></html>';
-  showSchedulePdfInModal(html);
+  var safeName = (currentScheduleSiteName || '일정').replace(/[/\\?*:\[\]"]/g, '_');
+  showSchedulePdfInModal(html, { pdfFilename: safeName + ' 일정.pdf', pdfKind: 'schedule' });
 }
 
 function scheduleEstimatePdf() {
@@ -639,7 +642,8 @@ function scheduleEstimatePdf() {
       var calHeader = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h5 style="margin:0;font-size:1.1rem">' + escapeHtml(currentScheduleSiteName || '일정') + ' - 일정 캘린더</h5></div>';
       var calendarSection = '<div class="sheet" style="page-break-before:always;padding:16px"><h2 style="font-size:1.3em;margin-bottom:12px">일정 캘린더</h2>' + calCss + calHeader + calArea.innerHTML + '</div></body></html>';
       var fullHtml = estimateHtml.trim() + calendarSection;
-      showSchedulePdfInModal(fullHtml);
+      var safeName = (currentScheduleSiteName || '견적일정').replace(/[/\\?*:\[\]"]/g, '_');
+      showSchedulePdfInModal(fullHtml, { pdfFilename: safeName + ' 견적+일정.pdf', pdfKind: 'estimate' });
     })
     .withFailureHandler(function(err) {
       alert('견적서를 불러오는 중 오류가 났습니다. ' + (err && err.message ? err.message : ''));
@@ -647,24 +651,61 @@ function scheduleEstimatePdf() {
     .getEstimatePdfHtml(currentScheduleSiteName);
 }
 
-function showSchedulePdfInModal(html) {
+function doSchedulePrint() {
+  var iframeEl = document.getElementById('schedulePdfIframe');
+  try {
+    if (iframeEl && iframeEl.contentWindow && typeof iframeEl.contentWindow.print === 'function') {
+      iframeEl.contentWindow.focus();
+      iframeEl.contentWindow.print();
+    } else if (window.__lastSchedulePdfHtml) {
+      var w = window.open('', '_blank');
+      w.document.write(window.__lastSchedulePdfHtml);
+      w.document.close();
+      w.onload = function() { w.focus(); w.print(); };
+    } else {
+      alert('인쇄를 열 수 없습니다.');
+    }
+  } catch (e) {
+    if (window.__lastSchedulePdfHtml) {
+      var w = window.open('', '_blank');
+      w.document.write(window.__lastSchedulePdfHtml);
+      w.document.close();
+      w.onload = function() { w.focus(); w.print(); };
+    } else {
+      alert('인쇄 실패: ' + (e.message || e));
+    }
+  }
+}
+
+function showSchedulePdfInModal(html, opts) {
+  opts = opts || {};
+  window.__lastSchedulePdfFilename = opts.pdfFilename || ((currentScheduleSiteName || '일정').replace(/[/\\?*:\[\]"]/g, '_') + ' 일정.pdf');
+  window.__lastSchedulePdfKind = opts.pdfKind || 'schedule';
   var modalEl = document.getElementById('schedulePdfModal');
   var iframeEl = document.getElementById('schedulePdfIframe');
   if (modalEl && iframeEl) {
+    if (window.innerWidth <= 768) {
+      var vp = (html.indexOf('273mm') !== -1 || html.indexOf('class="sheet"') !== -1) ? 'width=1032' : 'width=1032';
+      html = html.replace('<head>', '<head><meta name="viewport" content="' + vp + '">');
+    }
+    var printStyle = '<style>@media print { @page { size: 297mm 210mm; margin: 12mm; } html, body { width: 297mm !important; min-width: 297mm !important; max-width: 297mm !important; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; transform: none !important; } .schedule-calendar-wrap, .sheet { max-width: none !important; } }</style>';
+    if (html.indexOf('</head>') !== -1) html = html.replace('</head>', printStyle + '</head>');
+    window.__lastSchedulePdfHtml = html;
+    var footer = document.getElementById('schedulePdfModalFooter') || modalEl.querySelector('.modal-footer');
+    if (footer) {
+      footer.innerHTML = ''
+        + '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>'
+        + '<button type="button" class="btn btn-outline-primary" id="schedulePdfPrintBtn"><i class="bi bi-printer me-1"></i>인쇄</button>'
+        + '<button type="button" class="btn btn-primary" id="schedulePdfSavePdfBtn"><i class="bi bi-file-earmark-pdf me-1"></i>PDF 저장</button>';
+    }
     var doc = iframeEl.contentDocument || iframeEl.contentWindow.document;
     doc.open();
     doc.write(html);
     doc.close();
     var printBtn = document.getElementById('schedulePdfPrintBtn');
-    if (printBtn) {
-      printBtn.onclick = function() {
-        try {
-          (iframeEl.contentWindow || iframeEl.contentDocument.defaultView).print();
-        } catch (e) {
-          alert('인쇄 실패: ' + (e.message || e));
-        }
-      };
-    }
+    if (printBtn) printBtn.onclick = doSchedulePrint;
+    var savePdfBtn = document.getElementById('schedulePdfSavePdfBtn');
+    if (savePdfBtn) savePdfBtn.onclick = doScheduleSavePdf;
     var modal = new bootstrap.Modal(modalEl);
     modal.show();
   } else {
@@ -673,6 +714,214 @@ function showSchedulePdfInModal(html) {
     win.document.close();
     win.focus();
   }
+}
+
+function doScheduleSavePdf() {
+  var saveBtn = document.getElementById('schedulePdfSavePdfBtn');
+  var fileName = window.__lastSchedulePdfFilename || '일정.pdf';
+  var kind = window.__lastSchedulePdfKind || 'schedule';
+  if (typeof jspdf === 'undefined' || !jspdf.jsPDF) {
+    alert('PDF 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+    return;
+  }
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>PDF 생성 중...';
+  }
+  function restoreBtn() {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="bi bi-file-earmark-pdf me-1"></i>PDF 저장'; }
+  }
+
+  if (kind === 'estimate') {
+    google.script.run
+      .withSuccessHandler(function(jsonStr) {
+        if (!jsonStr) {
+          alert('해당 현장 견적 데이터가 없습니다.');
+          restoreBtn();
+          return;
+        }
+        var data = JSON.parse(jsonStr);
+        var pdfDoc = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        var buildEstimate = window.buildEstimatePdfFromData;
+        if (typeof buildEstimate !== 'function') {
+          alert('견적 PDF 생성 기능을 불러올 수 없습니다.');
+          restoreBtn();
+          return;
+        }
+        buildEstimate(data, pdfDoc, function() {
+          addScheduleTableToPdf(pdfDoc);
+          pdfDoc.save(fileName);
+          restoreBtn();
+        });
+      })
+      .withFailureHandler(function(err) {
+        restoreBtn();
+        alert('견적 데이터를 불러오지 못했습니다. ' + (err && err.message ? err.message : ''));
+      })
+      .getEstimateFromSheet(currentScheduleSiteName);
+    return;
+  }
+
+  if (!currentScheduleRows || currentScheduleRows.length === 0) {
+    alert('저장할 일정이 없습니다. 일정 자동 계산 후 다시 시도해 주세요.');
+    restoreBtn();
+    return;
+  }
+  var FONT_URL = 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf';
+  var pdfDoc = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  var black = [0, 0, 0];
+  function addFontThenBuild() {
+    if (window.__jspdfKoreanFontBase64) {
+      pdfDoc.addFileToVFS('NotoSansKR.ttf', window.__jspdfKoreanFontBase64);
+      pdfDoc.addFont('NotoSansKR.ttf', 'NotoSansKR', 'normal');
+      buildSchedulePdf();
+      return;
+    }
+    fetch(FONT_URL, { mode: 'cors' }).then(function(r) {
+      if (!r.ok) throw new Error();
+      return r.arrayBuffer();
+    }).then(function(buf) {
+      var bytes = new Uint8Array(buf);
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      window.__jspdfKoreanFontBase64 = btoa(binary);
+      pdfDoc.addFileToVFS('NotoSansKR.ttf', window.__jspdfKoreanFontBase64);
+      pdfDoc.addFont('NotoSansKR.ttf', 'NotoSansKR', 'normal');
+      buildSchedulePdf();
+    }).catch(function() {
+      alert('한글 폰트를 불러오지 못했습니다.');
+      restoreBtn();
+    });
+  }
+  function buildSchedulePdf() {
+    drawScheduleCalendarPdf(pdfDoc, currentScheduleSiteName || '일정', currentScheduleRows);
+    pdfDoc.save(fileName);
+    restoreBtn();
+  }
+  addFontThenBuild();
+}
+
+/** PDF에 캘린더 형식(요일·날짜 칸·공정) 그리기. 여러 달이면 여러 페이지 */
+function drawScheduleCalendarPdf(pdfDoc, title, rows) {
+  var black = [0, 0, 0];
+  var gray = [120, 120, 120];
+  pdfDoc.setFont('NotoSansKR', 'normal');
+  pdfDoc.setTextColor(black[0], black[1], black[2]);
+
+  var y = scheduleCalendarYear;
+  var m = scheduleCalendarMonth;
+  if (!y || !m) {
+    var firstStr = (rows && rows[0] && rows[0].startDate) ? rows[0].startDate : formatDateYMD(new Date());
+    var firstDt = parseDateYMD(firstStr);
+    if (firstDt) { y = firstDt.getFullYear(); m = firstDt.getMonth() + 1; }
+    else { y = new Date().getFullYear(); m = new Date().getMonth() + 1; }
+  }
+  var weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+  var margin = 10;
+  var bottomMargin = 18;
+  var pageW = 297 - margin * 2;
+  var tableMaxBottom = 210 - bottomMargin;
+  var headerH = 10;
+  var cellH = (tableMaxBottom - margin - headerH - 20) / 6;
+  var cellW = pageW / 7;
+  var titleTop = 14;
+
+  function drawOneMonth(yr, mo, startY) {
+    var first = new Date(yr, mo - 1, 1);
+    var last = new Date(yr, mo - 1 + 1, 0);
+    var firstDay = first.getDay();
+    var daysInMonth = last.getDate();
+    var hol = Object.assign({}, getKoreanHolidays(yr), mo === 1 ? getKoreanHolidays(yr - 1) : {}, mo === 12 ? getKoreanHolidays(yr + 1) : {});
+
+    pdfDoc.setFontSize(14);
+    pdfDoc.text(title + ' - ' + yr + '년 ' + mo + '월', 148, startY - 2, { align: 'center' });
+    pdfDoc.setFontSize(9);
+
+    var tableTop = startY + 2;
+    for (var col = 0; col <= 7; col++) {
+      pdfDoc.setDrawColor(180, 180, 180);
+      pdfDoc.line(margin + col * cellW, tableTop, margin + col * cellW, tableTop + headerH + cellH * 6);
+    }
+    for (var row = 0; row <= 7; row++) {
+      var lineY = tableTop + (row === 0 ? 0 : headerH + (row - 1) * cellH);
+      pdfDoc.line(margin, lineY, margin + pageW, lineY);
+    }
+
+    for (var w = 0; w < 7; w++) {
+      pdfDoc.setTextColor(black[0], black[1], black[2]);
+      pdfDoc.setFontSize(9);
+      pdfDoc.text(weekdays[w], margin + cellW * w + cellW / 2, tableTop + headerH - 3, { align: 'center' });
+    }
+
+    var cells = [];
+    var pad = firstDay;
+    for (var p = 0; p < pad; p++) {
+      var prevDate = new Date(yr, mo - 1, -pad + p + 1);
+      var dayStr = formatDateYMD(prevDate);
+      var tasks = getTasksForDay(rows, dayStr, hol);
+      cells.push({ day: prevDate.getDate(), tasks: tasks, other: true });
+    }
+    for (var d = 1; d <= daysInMonth; d++) {
+      var date = new Date(yr, mo - 1, d);
+      var dayStr = formatDateYMD(date);
+      var tasks = getTasksForDay(rows, dayStr, hol);
+      cells.push({ day: d, tasks: tasks, other: false });
+    }
+    var filled = pad + daysInMonth;
+    for (var r = filled; r < 42; r++) {
+      cells.push({ day: '', tasks: [], other: true });
+    }
+
+    for (var i = 0; i < 42 && i < cells.length; i++) {
+      var rowIdx = Math.floor(i / 7);
+      var colIdx = i % 7;
+      var cell = cells[i];
+      var x = margin + colIdx * cellW + 2;
+      var yCell = tableTop + headerH + rowIdx * cellH + 5;
+      pdfDoc.setFontSize(8);
+      if (cell.other && cell.day !== '') pdfDoc.setTextColor(gray[0], gray[1], gray[2]);
+      else pdfDoc.setTextColor(black[0], black[1], black[2]);
+      if (cell.day !== '') pdfDoc.text(String(cell.day), x, yCell);
+      var taskY = yCell + 5;
+      for (var t = 0; t < cell.tasks.length && taskY < tableTop + headerH + (rowIdx + 1) * cellH - 3; t++) {
+        var label = (cell.tasks[t].label || '').substring(0, 8);
+        if (label) {
+          pdfDoc.setFontSize(12);
+          pdfDoc.text(label, x, taskY);
+          taskY += 7;
+        }
+      }
+      pdfDoc.setTextColor(black[0], black[1], black[2]);
+    }
+    return tableTop + headerH + cellH * 6;
+  }
+
+  function hasScheduleInMonth(yr, mo) {
+    var first = new Date(yr, mo - 1, 1);
+    var last = new Date(yr, mo - 1 + 1, 0);
+    var firstStr = formatDateYMD(first);
+    var lastStr = formatDateYMD(last);
+    for (var r = 0; r < (rows || []).length; r++) {
+      var startStr = (rows[r].startDate || '').trim();
+      var endStr = (rows[r].endDate || rows[r].startDate || '').trim();
+      if (startStr && endStr && endStr >= firstStr && startStr <= lastStr) return true;
+    }
+    return false;
+  }
+
+  drawOneMonth(y, m, titleTop);
+  var nextY = m === 12 ? y + 1 : y;
+  var nextM = m === 12 ? 1 : m + 1;
+  if (hasScheduleInMonth(nextY, nextM)) {
+    pdfDoc.addPage('a4', 'l');
+    drawOneMonth(nextY, nextM, 12);
+  }
+}
+
+function addScheduleTableToPdf(pdfDoc) {
+  if (!currentScheduleRows || currentScheduleRows.length === 0) return;
+  pdfDoc.addPage('a4', 'l');
+  drawScheduleCalendarPdf(pdfDoc, (currentScheduleSiteName || '일정') + ' - 일정', currentScheduleRows);
 }
 
 function closeSchedulePdfModal() {

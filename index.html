@@ -12,6 +12,7 @@
 
   <?!= include('css'); ?>
 
+  <script>var SCRIPT_URL = '<?= ScriptApp.getService().getUrl() ?>';</script>
   <script>
     // ✅ Google Apps Script 배너 즉시 제거 (DOMContentLoaded 전에 실행)
     (function() {
@@ -125,7 +126,7 @@
 <!-- 메인 -->
 <div id="screen-main" class="screen active">
   <div class="container text-center main-buttons-wrap">
-    <h1 class="fw-bold text-white mb-2 main-title">스마트 현장관리 <span class="badge bg-primary">V6.1</span></h1>
+    <h1 class="fw-bold text-white mb-2 main-title">스마트 현장관리 <span class="badge bg-primary">V7</span></h1>
     <p class="text-secondary mb-4 mb-md-5 main-subtitle">도면 → 보관 → 견적까지 한 번에</p>
 
     <div class="d-grid gap-3 main-buttons">
@@ -364,11 +365,8 @@
         <div class="modal-body p-0 d-flex flex-column">
           <iframe id="pdfPreviewIframe" style="width:100%;flex:1;min-height:70vh;border:none;background:#fff;"></iframe>
         </div>
-        <div class="modal-footer border-secondary">
-          <button type="button" class="btn btn-primary" id="pdfPreviewPrintBtn">
-            <i class="bi bi-printer me-1"></i>인쇄하여 PDF로 저장
-          </button>
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+        <div class="modal-footer border-secondary d-flex justify-content-end gap-2" id="pdfPreviewModalFooter">
+          <!-- 버튼은 js_estimate에서 PDF 미리보기 열 때 채움 -->
         </div>
       </div>
     </div>
@@ -395,11 +393,8 @@
         <div class="modal-body p-0 d-flex flex-column">
           <iframe id="schedulePdfIframe" style="width:100%;flex:1;min-height:70vh;border:none;background:#fff;"></iframe>
         </div>
-        <div class="modal-footer border-secondary">
-          <button type="button" class="btn btn-primary" id="schedulePdfPrintBtn">
-            <i class="bi bi-printer me-1"></i>인쇄하여 PDF로 저장
-          </button>
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+        <div class="modal-footer border-secondary d-flex justify-content-end gap-2" id="schedulePdfModalFooter">
+          <!-- 닫기 / 인쇄 / PDF 저장 버튼은 js_schedule에서 주입 -->
         </div>
       </div>
     </div>
@@ -418,6 +413,9 @@
 
 <!-- 스크립트 -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.31/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <?!= include('js_main'); ?>
 <?!= include('js_drawing'); ?>
