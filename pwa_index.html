@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>스마트 현장관리</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
     <link rel="manifest" href="manifest.json">
     <style>
         /* 1. 여백 제거 및 전체 화면 설정 */
@@ -12,6 +14,8 @@
             padding: 0; 
             width: 100%; 
             height: 100%; 
+            height: 100dvh; /* 설치 앱 전체 화면 (모바일) */
+            min-height: 100%;
             overflow: hidden; /* 스크롤바 숨김 */
             background-color: #000; /* 배경 검은색 */
         }
