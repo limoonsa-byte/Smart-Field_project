@@ -13,9 +13,11 @@
 </head>
 <body>
     <!-- 알림: 앱 설치는 이 페이지(GitHub Pages 주소)에서만 가능합니다. 구글 웹앱 주소로 들어가면 설치 버튼이 안 뜹니다. -->
-    <div id="pwa-install-hint" style="position:fixed;top:0;left:0;right:0;background:#000;color:#fff;padding:6px 10px;font-size:12px;text-align:center;z-index:9999;">
-        앱 설치: 이 페이지에서만 가능 → 주소창 옆 <strong>설치</strong> 버튼 또는 브라우저 메뉴에서 「앱 설치」
-        <button type="button" onclick="this.parentElement.remove()" style="margin-left:8px;padding:2px 8px;">닫기</button>
+    <div id="pwa-install-hint" style="position:fixed;top:0;left:0;right:0;background:#000;color:#fff;padding:6px 10px;font-size:12px;text-align:center;z-index:9999;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;">
+        <span>앱 설치: 이 페이지에서만 가능</span>
+        <button type="button" id="pwa-install-btn" style="padding:6px 14px;background:#fff;color:#000;border:none;border-radius:6px;font-weight:bold;cursor:pointer;display:none;">앱 설치</button>
+        <span id="pwa-install-fallback" style="font-size:11px;">→ 주소창 옆 설치 버튼 또는 메뉴(⋮) → 앱 설치</span>
+        <button type="button" onclick="this.parentElement.remove()" style="margin-left:4px;padding:2px 8px;background:#444;color:#fff;border:none;cursor:pointer;">닫기</button>
     </div>
     <!-- 아래 src에 배포된 웹 앱 주소를 넣으세요 (배포 → 앱 URL 복사) -->
     <iframe src="https://script.google.com/macros/s/AKfycbwIhVGUxxCb4hEbssvbryYmTlBSEtljhcIK7YKk_l1AfvVwFgCrRWDyTFG0NGyqYxfN/exec"></iframe>
@@ -23,6 +25,18 @@
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js');
         }
+        var deferredPrompt;
+        window.addEventListener('beforeinstallprompt', function(e) {
+            e.preventDefault();
+            deferredPrompt = e;
+            var btn = document.getElementById('pwa-install-btn');
+            if (btn) {
+                btn.style.display = 'inline-block';
+                btn.onclick = function() { if (deferredPrompt) deferredPrompt.prompt(); };
+            }
+            var fallback = document.getElementById('pwa-install-fallback');
+            if (fallback) fallback.style.display = 'none';
+        });
     </script>
 </body>
 </html>
