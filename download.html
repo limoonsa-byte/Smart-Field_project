@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스마트 현장관리 다운로드</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        .icon-box {
+            width: 120px;
+            height: 120px;
+            background-color: #fff;
+            border-radius: 25px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 50px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        h1 { margin: 0 0 10px 0; font-size: 24px; }
+        p { color: #aaa; margin: 0 0 30px 0; font-size: 14px; }
+        
+        /* 다운로드 버튼 스타일 */
+        .install-btn {
+            background-color: #007AFF;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 122, 255, 0.3);
+            transition: transform 0.1s;
+        }
+        .install-btn:active { transform: scale(0.95); }
+
+        /* 아이폰용 안내 화살표 (평소엔 숨김) */
+        .ios-guide {
+            display: none; 
+            margin-top: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="icon-box">🏗️</div>
+
+    <h1>스마트 현장관리 V7</h1>
+    <p>현장 관리의 모든 것, 터치 한 번으로 시작하세요.</p>
+
+    <button class="install-btn" id="installBtn">앱 다운로드</button>
+
+    <div class="ios-guide" id="iosGuide">
+        👇 아래 <strong>공유 버튼</strong>을 누르고<br>
+        <strong>'홈 화면에 추가'</strong>를 선택하세요.
+    </div>
+
+    <script>
+        let deferredPrompt;
+        const installBtn = document.getElementById('installBtn');
+        const iosGuide = document.getElementById('iosGuide');
+
+        // 1. 안드로이드: 설치 가능한지 감지
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installBtn.style.display = 'block'; // 버튼 보이기
+        });
+
+        // 2. 버튼 클릭 시 설치 창 띄우기
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt(); // 진짜 설치 창 띄움
+                const { outcome } = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+            } else {
+                // 이미 설치했거나 아이폰인 경우
+                alert('이미 설치되었거나, 브라우저 메뉴에서 [홈 화면에 추가]를 눌러주세요.');
+            }
+        });
+
+        // 3. 아이폰인지 확인하고 안내 띄우기
+        const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        if (isIos) {
+            installBtn.style.display = 'none'; // 아이폰은 버튼으로 설치 불가
+            iosGuide.style.display = 'block';  // 대신 안내문구 보여줌
+        }
+        
+        // 4. 서비스 워커 등록 (설치 필수조건)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
