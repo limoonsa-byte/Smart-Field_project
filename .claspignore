@@ -1,0 +1,9 @@
+# 문서 폴더는 Apps Script에 업로드하지 않음
+docs/
+
+# 기타
+_backup_before_pull/
+.cursor/
+.git/
+.gitignore
+README.md

@@ -40,7 +40,7 @@
 ■ 프로젝트 폴더로 이동
   cd Smart-Field_project
 
-■ Apps Script와 연결 확인
+■ Apps Script 연결 확인
   - .clasp.json 이 존재하는지 확인
   - 필요하면 clasp clone "스크립트ID" 로 다시 연결
   - 또는 .clasp.json.example 파일을 복사하여 .clasp.json 생성 후 Script ID 입력

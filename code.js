@@ -41,11 +41,12 @@ function doGet(e) {
       return HtmlService.createHtmlOutput('<p>다운로드 실패: ' + (err.message || err) + '</p>');
     }
   }
-  return HtmlService.createTemplateFromFile('index')
-    .evaluate()
-    .setTitle('스마트 현장관리 V7')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  var template = HtmlService.createTemplateFromFile('index');
+  // ▼ 아래 두 줄 필수: 다른 사이트에서 내 앱을 iframe으로 보여줘도 되도록 허용 + 모바일 뷰포트
+  return template.evaluate()
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setTitle('스마트 현장관리 V7');
 }
 
 function doPost(e) {
